@@ -17,10 +17,10 @@ Phase 04B establishes the fundamental, implementation-ready mathematical primiti
 This specification defines domain-level value objects and exceptions adhering strictly to Clean Architecture principles:
 - **Included:**
   - Strongly typed physical quantities: `Angle` (radians canonical), `Distance` (meters canonical, non-negative magnitude).
-  - High-precision, unit-neutral `Vector3` primitive with runtime validation, robust scaled normalization (preventing overflow/underflow across extreme binary64 exponents), and standard vector algebra.
+  - High-precision, unit-neutral `Vector3` primitive with runtime validation, robust scaled normalization (preventing overflow across extreme binary64 exponents), and standard vector algebra.
   - Strongly typed frame and origin identifiers (`ReferenceFrameId`, `CoordinateOriginId`, `VectorUnit`).
   - Metadata-preserving `FramedVector3` combining `Vector3` with its spatial frame orientation, origin, and component unit.
-  - Dedicated domain-level exception `ScientificComputationException` with stable error codes, descriptive diagnostic message, and immutable context.
+  - Dedicated domain-level exception `ScientificComputationException` with stable error codes, descriptive diagnostic message, and deeply validated immutable context.
   - Comprehensive unit and numerical test matrix with operation-specific scale-aware tolerances.
 - **Explicitly Excluded (Deferred to later subphases and phases):**
   - Frame transformations and rotation matrices ($R_{A \to B}$) — deferred to Phase 04C.
@@ -93,7 +93,7 @@ Encapsulates a planar angle in double precision.
   - `Angle operator -(Angle other)`: Evaluates `radians - other.radians`. Throws `ScientificComputationException(code: 'ARITHMETIC_OVERFLOW')` if difference is non-finite.
   - `Angle operator -()`: Unary negation. Evaluates `-radians`.
   - `Angle operator *(double scalar)`: Rejects non-finite scalar (`NON_FINITE_VALUE`). Throws `ScientificComputationException(code: 'ARITHMETIC_OVERFLOW')` if product is non-finite.
-  - `Angle operator /(double scalar)`: Rejects non-finite scalar (`NON_FINITE_VALUE`). Rejects $s = 0.0$ throwing `ScientificComputationException(code: 'DIVISION_BY_ZERO')`. Throws `ScientificComputationException(code: 'ARITHMETIC_OVERFLOW')` if quotient is non-finite.
+  - `Angle operator /(double scalar)`: Rejects non-finite scalar (`NON_FINITE_VALUE`). Rejects $s == 0.0$ or $s == -0.0$ throwing `ScientificComputationException(code: 'DIVISION_BY_ZERO')`. Throws `ScientificComputationException(code: 'ARITHMETIC_OVERFLOW')` if quotient is non-finite.
 - **Comparisons & Value Equality:**
   - Implements `Comparable<Angle>` based on `radians`.
   - Standard `operator ==` (exact IEEE equality on `radians`), `hashCode`, and `toString()`.
@@ -102,7 +102,7 @@ Encapsulates a planar angle in double precision.
 Encapsulates a physical distance or magnitude in double precision.
 - **Canonical Storage:** Meters (`final double meters`).
 - **Constructors:**
-  - `Distance.fromMeters(double meters)`: Validates that `meters` is finite; rejects negative scalar (`meters < 0.0`); throws `ScientificComputationException`.
+  - `Distance.fromMeters(double meters)`: Validates that `meters` is finite (`NON_FINITE_VALUE`); rejects negative scalar (`meters < 0.0`) with `NEGATIVE_DISTANCE`.
   - `Distance.fromKilometers(double kilometers)`: Validates that `kilometers` is finite (`NON_FINITE_VALUE`); rejects `kilometers < 0.0` (`NEGATIVE_DISTANCE`); computes `meters = kilometers * 1000.0`; validates finite result; throws `ScientificComputationException(code: 'ARITHMETIC_OVERFLOW')` if product overflows.
 - **Accessors:**
   - `double get inMeters => meters;`
@@ -115,7 +115,11 @@ Encapsulates a physical distance or magnitude in double precision.
   - `Distance operator +(Distance other)`: Evaluates `meters + other.meters`. Throws `ScientificComputationException(code: 'ARITHMETIC_OVERFLOW')` if sum overflows finite binary64 range.
   - `Distance operator -(Distance other)`: Evaluates `meters - other.meters`. If `other.meters > meters`, throws `ScientificComputationException(code: 'NEGATIVE_DISTANCE')`.
   - `Distance operator *(double scalar)`: Rejects non-finite scalar (`NON_FINITE_VALUE`). Rejects negative scalar ($s < 0.0$) throwing `ScientificComputationException(code: 'NEGATIVE_DISTANCE')`. Throws `ScientificComputationException(code: 'ARITHMETIC_OVERFLOW')` if product overflows.
-  - `Distance operator /(double scalar)`: Rejects non-finite scalar (`NON_FINITE_VALUE`). Rejects $s \le 0.0$ throwing `ScientificComputationException(code: 'DIVISION_BY_ZERO' or 'NEGATIVE_DISTANCE')`. Throws `ScientificComputationException(code: 'ARITHMETIC_OVERFLOW')` if quotient overflows.
+  - `Distance operator /(double scalar)`: Unambiguous error hierarchy:
+    1. If `scalar.isNaN || scalar.isInfinite`: Throws `ScientificComputationException(code: 'NON_FINITE_VALUE')`.
+    2. If `scalar == 0.0 || scalar == -0.0`: Throws `ScientificComputationException(code: 'DIVISION_BY_ZERO')`.
+    3. If `scalar < 0.0`: Throws `ScientificComputationException(code: 'NEGATIVE_DISTANCE')`.
+    4. Evaluates `meters / scalar`. If the quotient overflows to infinity, throws `ScientificComputationException(code: 'ARITHMETIC_OVERFLOW')`.
 - **Comparisons & Value Equality:**
   - Implements `Comparable<Distance>` based on `meters`.
   - Standard `operator ==`, `hashCode`, and `toString()`.
@@ -164,7 +168,8 @@ In Dart, a constructor cannot be declared `const` if its constructor body execut
    - Factory constructors: `factory Vector3.zero() => zero;`, `factory Vector3.unitX() => unitX;`, etc.
 4. **Security Boundary:** All arbitrary user/runtime inputs must pass through the public `Vector3(x, y, z)` constructor or mathematical operators, ensuring that invalid non-finite instances can never be instantiated.
 
-#### 3.2.2 Mathematical Operations
+#### 3.2.2 Mathematical Operations & Intermediate Overflow Semantics
+For the initial Phase 04B implementation, operations employ direct IEEE-754 binary64 component arithmetic:
 1. **Vector Addition & Subtraction:**
    $$\vec{u} + \vec{v} = (u_x + v_x, u_y + v_y, u_z + v_z)^T$$
    $$\vec{u} - \vec{v} = (u_x - v_x, u_y - v_y, u_z - v_z)^T$$
@@ -173,25 +178,35 @@ In Dart, a constructor cannot be declared `const` if its constructor body execut
    $$s \cdot \vec{v} = (s \cdot v_x, s \cdot v_y, s \cdot v_z)^T$$
    $$\vec{v} / s = (v_x / s, v_y / s, v_z / s)^T$$
    - Scalar multiplication throws `ScientificComputationException(code: 'NON_FINITE_VALUE')` if $s$ is non-finite, or `ARITHMETIC_OVERFLOW` if a product component overflows.
-   - Division throws `ScientificComputationException(code: 'DIVISION_BY_ZERO')` if $s = 0.0$, `NON_FINITE_VALUE` if $s$ is non-finite, and `ARITHMETIC_OVERFLOW` if a quotient component overflows.
+   - Division throws `ScientificComputationException(code: 'DIVISION_BY_ZERO')` if $s == 0.0 || s == -0.0$, `NON_FINITE_VALUE` if $s$ is non-finite, and `ARITHMETIC_OVERFLOW` if a quotient component overflows.
 3. **Dot Product:**
    $$\vec{u} \cdot \vec{v} = u_x v_x + u_y v_y + u_z v_z$$
-   Returns a `double`. Throws `ScientificComputationException(code: 'ARITHMETIC_OVERFLOW')` if intermediate products or the final sum overflow to infinity.
+   - **Intermediate Overflow Policy [PROJECT CONTRACT]:**
+     Direct component arithmetic is applied: compute pairwise products $p_x = u_x v_x$, $p_y = u_y v_y$, $p_z = u_z v_z$.
+     Each product is checked for finiteness: if `!p_x.isFinite || !p_y.isFinite || !p_z.isFinite`, throw `ScientificComputationException(code: 'ARITHMETIC_OVERFLOW')`.
+     Compute the sum $s = p_x + p_y + p_z$. If `!s.isFinite`, throw `ScientificComputationException(code: 'ARITHMETIC_OVERFLOW')`.
+     *Note:* If an intermediate multiplication overflows, the operation throws `ARITHMETIC_OVERFLOW` even if compensatory terms in a mathematically rearranged formulation might have canceled out to a finite result. Compensated dot products (e.g. Ogita-Rump-Oishi algorithms) are deferred to later numerical refinements.
 4. **Cross Product:**
    $$\vec{u} \times \vec{v} = \begin{pmatrix} u_y v_z - u_z v_y \\ u_z v_x - u_x v_z \\ u_x v_y - u_y v_x \end{pmatrix}$$
-   Returns a `Vector3`. Validates finiteness of all components via the constructor; throws `ARITHMETIC_OVERFLOW` if intermediate products overflow.
+   - **Intermediate Overflow Policy [PROJECT CONTRACT]:**
+     Direct component arithmetic is applied: for each component (e.g. $c_x = u_y v_z - u_z v_y$), both products $u_y v_z$ and $u_z v_y$ are evaluated and checked for finiteness. If either product overflows, or if their subtraction produces non-finite values, throw `ScientificComputationException(code: 'ARITHMETIC_OVERFLOW')`.
+     Returns a `Vector3` passing through the validating constructor.
 
 #### 3.2.3 Scaled Magnitude and Normalization Algorithms
 
 ##### The Mathematical Failure Modes of Naive Sum-of-Squares
 A naive Euclidean magnitude calculation $\|\vec{v}\| = \sqrt{x^2 + y^2 + z^2}$ suffers from two severe IEEE-754 binary64 limitations:
 1. **Squaring Overflow:** The maximum representable finite binary64 float is $\Omega \approx 1.7976931348623157 \times 10^{308}$. If any component exceeds $\sqrt{\Omega / 3} \approx 7.74 \times 10^{153}$, squaring that component results in $+\infty$. The subsequent sum and square root evaluate to $+\infty$, causing an arithmetic failure even though the actual mathematical magnitude $\sqrt{x^2 + y^2 + z^2}$ is well within representable floating-point bounds.
-2. **Squaring Underflow (Subnormal and Zero Limits):**
+2. **Squaring Underflow and the Underflow-to-Zero Boundary:**
    - The smallest positive **normal** binary64 float is $2^{-1022} \approx 2.2250738585072014 \times 10^{-308}$.
    - The smallest positive **subnormal** binary64 float is $2^{-1074} \approx 4.9406564584124654 \times 10^{-324}$.
-   - If a component $|x| < \sqrt{2^{-1022}} \approx 1.4916681462400413 \times 10^{-154}$, squaring it yields a value strictly below the normal threshold ($x^2 < 2^{-1022}$). The squared result underflows into the subnormal range ($2^{-1074} \le x^2 < 2^{-1022}$), incurring progressive loss of precision due to diminishing significant bits.
-   - If $|x| < \sqrt{2^{-1074}} \approx 2.2227587494850775 \times 10^{-162}$, squaring it flushes completely to $+0.0$ (complete underflow).
-   - If all components satisfy $|x|, |y|, |z| < \sqrt{2^{-1074}}$, the naive sum evaluates to $0.0$, and the calculated magnitude becomes exactly $0.0$, causing subsequent normalization to erroneously throw a division-by-zero exception on non-zero vectors.
+   - **Normal vs Subnormal Transition:** When $|x| < \sqrt{2^{-1022}} \approx 1.4916681462400413 \times 10^{-154}$, squaring it yields a value strictly below the normal threshold ($x^2 < 2^{-1022}$). The squared result becomes subnormal, losing significand precision bits progressively.
+   - **Round-to-Nearest Underflow-to-Zero Boundary:**
+     Under IEEE-754 default round-to-nearest (ties-to-even) mode, a positive squared result rounds to zero if it falls strictly below half the minimum subnormal value, i.e., $x^2 < 2^{-1075}$.
+     The square-root magnitude boundary corresponding to this rounding threshold is:
+     $$\sqrt{2^{-1075}} = 2^{-537.5} \approx 1.57172778 \times 10^{-162}$$
+     *Important Precision Note:* The exact boundary behavior near $2^{-537.5}$ depends on the IEEE-754 rounding rule (including ties-to-even behavior on the exact midpoint). Values cannot be assumed to round to zero based solely on a rough approximation without considering the exact rounding mode.
+   - If all components round to zero upon squaring, the naive sum evaluates to $+0.0$, causing subsequent normalization to erroneously throw a division-by-zero exception on non-zero vectors.
 
 ##### Algorithm 1: Scaled Magnitude (Blue's Algorithm / Maximum Component Scaling)
 To guarantee numerical stability across the entire binary64 exponent dynamic range without overflow or premature underflow:
@@ -205,14 +220,16 @@ To guarantee numerical stability across the entire binary64 exponent dynamic ran
    $$\|\vec{v}\| = m \cdot \sqrt{(x')^2 + (y')^2 + (z')^2}$$
 6. If the final product $m \cdot \sqrt{\dots}$ overflows to infinity (which can occur only if $m$ is within a factor of $\sqrt{3}$ of $\Omega$), throw `ScientificComputationException(code: 'MAGNITUDE_OVERFLOW')`.
 
-##### Algorithm 2: Scaled Normalization
+##### Algorithm 2: Scaled Normalization & Its Precise Guarantees
 To compute the unit vector $\hat{v} = \vec{v} / \|\vec{v}\|$:
 1. Determine $m = \max(|x|, \max(|y|, |z|))$.
 2. **Zero-Vector Rejection:** If $m = 0.0$ (meaning $x = 0 \land y = 0 \land z = 0$ exactly), the vector has undefined direction. Throw `ScientificComputationException(code: 'ZERO_VECTOR_NORMALIZATION')`.
 3. If $m$ is non-finite, throw `ScientificComputationException(code: 'NON_FINITE_VALUE')`.
 4. Scale components by $m$:
    $$x' = x / m, \quad y' = y / m, \quad z' = z / m$$
-5. Compute the scaled magnitude $L' = \sqrt{(x')^2 + (y')^2 + (z')^2}$. Notice that because at least one component has $|x'/y'/z'| = 1.0$, $L' \ge 1.0$. Therefore, $L'$ can never underflow to zero or be subnormal.
+5. Compute the scaled magnitude $L' = \sqrt{(x')^2 + (y')^2 + (z')^2}$.
+   - **Guaranteed Dominant-Scale Invariant:** Because at least one component has $|x'/y'/z'| == 1.0$, $L' \ge 1.0$. Therefore, $L'$ can never underflow to zero, and the overall normalization algorithm cannot fail due to underflow of the norm.
+   - **Precision Limitations on Disparate Components:** Maximum-component scaling guarantees that the dominant components are normalized without underflow. However, if a vector contains an extremely small component alongside an astronomically larger component (e.g. $x = 10^{300}, y = 1.0$), the ratio $y / m = 10^{-300}$ will underflow upon squaring or component scaling. The algorithm does **not** guarantee preservation of tiny components whose magnitude difference relative to $m$ exceeds the binary64 significand dynamic range ($> 53$ bits or $> 2^{-1022}$). This represents a fundamental limit of floating-point arithmetic, not an algorithm defect.
 6. The normalized components are:
    $$\hat{v} = \begin{pmatrix} x' / L' \\ y' / L' \\ z' / L' \end{pmatrix}$$
 7. Return a new `Vector3` constructed from these components.
@@ -311,40 +328,57 @@ class FramedVector3 {
 
 ---
 
-### 3.4 Scientific Failure Contract
+### 3.4 Scientific Failure Contract & Enforceable Context Immutability
 
-To prevent unhandled exceptions or exposing raw system stack traces to operators, Phase 04B specifies a dedicated domain exception with guaranteed immutable context:
+To prevent unhandled exceptions, diagnostic state tampering, or exposing raw system stack traces to operators, Phase 04B specifies a dedicated domain exception with deeply validated immutable diagnostic context:
 
 ```dart
 @immutable
 class ScientificComputationException implements Exception {
   final String message;
   final String code;
-  final Map<String, Object> context;
+  final Map<String, Object?> context;
 
   ScientificComputationException({
     required this.message,
     required this.code,
-    Map<String, Object> context = const {},
-  }) : context = Map.unmodifiable(Map<String, Object>.from(context));
+    Map<String, Object?> context = const {},
+  }) : context = _validateAndFreezeContext(context);
+
+  static Map<String, Object?> _validateAndFreezeContext(Map<String, Object?> raw) {
+    final copy = <String, Object?>{};
+    for (final entry in raw.entries) {
+      final value = entry.value;
+      if (value == null || value is num || value is String || value is bool) {
+        copy[entry.key] = value;
+      } else {
+        throw ArgumentError(
+          'ScientificComputationException context only supports immutable primitives '
+          '(String, int, double, bool, null). Got ${value.runtimeType} for key "${entry.key}".',
+        );
+      }
+    }
+    return Map.unmodifiable(copy);
+  }
 
   @override
   String toString() => 'ScientificComputationException($code: $message, context: $context)';
 }
 ```
 
-#### Immutability Strategy:
-- The `context` map is defensively copied and wrapped in `Map.unmodifiable` during construction.
-- Callers and external consumers cannot mutate diagnostic state after instantiation.
-- Values inside `context` must be primitive or immutable diagnostic values (e.g. `double`, `int`, `String`).
+#### Context Immutability & Diagnostic Value Model:
+- **Supported Value Types:** `String`, `int`, `double`, `bool`, and `null`.
+- **Unsupported Value Rejection:** Any mutable collections (`List`, `Map`, `Set`) or arbitrary domain objects passed into `context` are strictly rejected with an `ArgumentError` during construction.
+- **Defensive Unmodifiable Map:** The resulting map is wrapped in `Map.unmodifiable`.
+- **Immutability Guarantee:** Because all keys are `String` and all values are primitive/immutable types, the diagnostic context is deeply immutable and free of mutation side effects without requiring third-party libraries.
 
 #### Stable Error Codes:
 - `NON_FINITE_VALUE`: Encountered `NaN`, `+Infinity`, or `-Infinity` in inputs or arguments.
 - `NEGATIVE_DISTANCE`: Attempted to construct a `Distance` with a negative scalar, subtract a larger distance from a smaller distance, or multiply/divide by a negative scalar.
-- `ZERO_VECTOR_NORMALIZATION`: Attempted to normalize a vector whose components are all exactly zero.
-- `DIVISION_BY_ZERO`: Division by zero scalar in vector or quantity arithmetic.
+- `ZERO_VECTOR_NORMALIZATION`: Attempted to normalize a vector whose components are all exactly zero ($m == 0.0$).
+- `DIVISION_BY_ZERO`: Division by zero scalar ($s == 0.0 || s == -0.0$) in vector or quantity arithmetic.
 - `MAGNITUDE_OVERFLOW`: Vector magnitude calculation exceeded IEEE-754 binary64 range.
-- `ARITHMETIC_OVERFLOW`: A mathematical operation on finite inputs produced an unrepresentable infinite result.
+- `ARITHMETIC_OVERFLOW`: A mathematical operation on finite inputs produced an unrepresentable infinite result, or intermediate multiplication in dot/cross products overflowed.
 - `UNIT_MISMATCH`: Unit conversion attempted with incompatible unit specifications (e.g. dimensionless to meters).
 
 ---
@@ -372,21 +406,23 @@ Floating-point comparisons must never use exact equality (`==`), except when che
 | `Angle` | Non-Finite Input Rejection | `double.nan`, `double.infinity`, `double.negativeInfinity` | Throws `ScientificComputationException(code: 'NON_FINITE_VALUE')` |
 | `Angle` | Preserve Signed Value | $-720.0°$, $+1080.0°$ | Preserved exactly, no modulo $360°$ wrapping |
 | `Angle` | Arithmetic & Overflow | $\text{Angle}(\pi) + \text{Angle}(\pi)$, $\text{Angle}(10^{308}) \times 10.0$ | Adds correctly; throws `ARITHMETIC_OVERFLOW` on overflow |
-| `Angle` | Division by Zero | $\text{Angle}(\pi) / 0.0$ | Throws `ScientificComputationException(code: 'DIVISION_BY_ZERO')` |
+| `Angle` | Division by Zero | $\text{Angle}(\pi) / 0.0$, $\text{Angle}(\pi) / (-0.0)$ | Throws `ScientificComputationException(code: 'DIVISION_BY_ZERO')` |
 | `Distance` | Meters to Kilometers | $1,737,400.0\text{ m}$, $1,000.0\text{ m}$ | $1,737.4\text{ km}$, $1.0\text{ km}$ exactly |
 | `Distance` | Kilometers to Meters Overflow | `Distance.fromKilometers(1e306)` | Throws `ScientificComputationException(code: 'ARITHMETIC_OVERFLOW')` |
 | `Distance` | Negative Rejection | $-0.001\text{ m}$, $-1,000.0\text{ m}$ | Throws `ScientificComputationException(code: 'NEGATIVE_DISTANCE')` |
 | `Distance` | Non-Finite Input Rejection | `double.nan`, `double.infinity` | Throws `ScientificComputationException(code: 'NON_FINITE_VALUE')` |
 | `Distance` | Subtraction Boundary | $100\text{ m} - 150\text{ m}$ | Throws `ScientificComputationException(code: 'NEGATIVE_DISTANCE')` |
-| `Distance` | Multiplication / Division | $100\text{ m} \times 2.5$, $100\text{ m} / 0.0$, $100\text{ m} \times (-1.0)$ | $250\text{ m}$; throws `DIVISION_BY_ZERO`; throws `NEGATIVE_DISTANCE` |
+| `Distance` | Unambiguous Division Semantics | $100\text{ m} / 0.0$, $100\text{ m} / (-2.0)$, $100\text{ m} / \text{NaN}$ | Throws `DIVISION_BY_ZERO`; throws `NEGATIVE_DISTANCE`; throws `NON_FINITE_VALUE` |
 | `Vector3` | Non-Const Validating Constructor | `Vector3(1.0, double.nan, 3.0)` | Throws `ScientificComputationException(code: 'NON_FINITE_VALUE')` |
 | `Vector3` | Canonical Const Instances | `Vector3.zero`, `Vector3.unitX`, `unitY`, `unitZ` | Correct components, exact immutable instances |
 | `Vector3` | Addition / Subtraction | $(1, 2, 3) + (4, 5, 6)$ | $(5, 7, 9)$ exactly |
 | `Vector3` | Addition Overflow | $(10^{308}, 0, 0) + (10^{308}, 0, 0)$ | Throws `ScientificComputationException(code: 'ARITHMETIC_OVERFLOW')` |
 | `Vector3` | Scalar Multiply / Divide | $(2, -4, 6) \cdot 0.5$, $(2, -4, 6) / 2.0$ | $(1, -2, 3)$ exactly |
-| `Vector3` | Scalar Division by Zero | $(1, 2, 3) / 0.0$ | Throws `ScientificComputationException(code: 'DIVISION_BY_ZERO')` |
+| `Vector3` | Scalar Division by Zero | $(1, 2, 3) / 0.0$, $(1, 2, 3) / (-0.0)$ | Throws `ScientificComputationException(code: 'DIVISION_BY_ZERO')` |
 | `Vector3` | Dot Product Invariants | $\hat{i} \cdot \hat{j}$, $\hat{i} \cdot \hat{i}$, $\vec{u} \cdot \vec{v} == \vec{v} \cdot \vec{u}$ | $0.0$, $1.0$, commutative identity |
+| `Vector3` | Dot Product Intermediate Overflow | $(10^{200}, 0, 0) \cdot (10^{200}, 0, 0)$ | Throws `ScientificComputationException(code: 'ARITHMETIC_OVERFLOW')` |
 | `Vector3` | Cross Product Invariants | $\hat{i} \times \hat{j}$, $\hat{j} \times \hat{k}$, $\hat{k} \times \hat{i}$, $\vec{u} \times \vec{u}$ | $\hat{k}$, $\hat{i}$, $\hat{j}$, $\vec{0}$ |
+| `Vector3` | Cross Product Intermediate Overflow | $(10^{200}, 0, 0) \times (0, 10^{200}, 0)$ | Throws `ScientificComputationException(code: 'ARITHMETIC_OVERFLOW')` |
 | `Vector3` | Scaled Magnitude (Large) | $(10^{200}, 10^{200}, 10^{200})$ | $\sqrt{3} \times 10^{200}$ (naive would overflow to $+\infty$) |
 | `Vector3` | Scaled Magnitude (Small) | $(10^{-200}, 10^{-200}, 10^{-200})$ | $\sqrt{3} \times 10^{-200}$ (naive would underflow to $0.0$) |
 | `Vector3` | Scaled Normalization | $(0, 3 \times 10^{250}, 4 \times 10^{250})$ | $(0, 0.6, 0.8)$ with unit magnitude within $\epsilon_{\text{norm}}$ |
@@ -398,7 +434,9 @@ Floating-point comparisons must never use exact equality (`==`), except when che
 | `FramedVector3` | Conversion Overflow | $(10^{306}, 0, 0)\text{ km} \to \text{m}$ | Throws `ScientificComputationException(code: 'ARITHMETIC_OVERFLOW')` |
 | `FramedVector3` | Incompatible Unit Rejection | `dimensionless` $\to$ `meters` | Throws `ScientificComputationException(code: 'UNIT_MISMATCH')` |
 | `FramedVector3` | Metadata Preservation | Access `vector`, `frame`, `origin`, `unit` | All fields preserve reference and value identities |
-| `ScientificComputationException` | Context Immutability | Attempt to mutate `context` map | Throws `UnsupportedError` (unmodifiable map) |
+| `ScientificComputationException` | Context Map Mutation Rejection | Call `e.context['new'] = 1` | Throws `UnsupportedError` (unmodifiable map) |
+| `ScientificComputationException` | Unsupported Context Value Rejection | Pass `context: {'list': [1, 2, 3]}` | Throws `ArgumentError` |
+| `ScientificComputationException` | Valid Primitive Context Values | Pass `context: {'str': 'val', 'num': 42.5, 'flag': true, 'nil': null}` | Retains all primitive entries accessible |
 
 ---
 
@@ -437,6 +475,8 @@ lib/features/scientific_geometry/
 
 test/features/scientific_geometry/
 ├── domain/
+│   ├── failures/
+│   │   └── scientific_computation_exception_test.dart
 │   ├── quantities/
 │   │   ├── angle_test.dart
 │   │   └── distance_test.dart
@@ -451,9 +491,9 @@ test/features/scientific_geometry/
 ## 7. Dependencies and Implementation Order
 
 Phase 04B has zero external runtime package dependencies beyond pure Dart:
-1. **Step 1:** Implement `ScientificComputationException` with immutable context.
-2. **Step 2:** Implement `Angle` and `Distance` with strict validation and overflow handling.
-3. **Step 3:** Implement `Vector3` with non-const validating constructor, private const constructor for canonical constants, and Blue's scaled magnitude and normalization algorithms.
+1. **Step 1:** Implement `ScientificComputationException` with validated immutable context.
+2. **Step 2:** Implement `Angle` and `Distance` with strict validation, unambiguous division semantics, and overflow handling.
+3. **Step 3:** Implement `Vector3` with non-const validating constructor, private const constructor for canonical constants, Blue's scaled magnitude/normalization algorithms, and intermediate overflow checks on dot/cross products.
 4. **Step 4:** Implement `VectorUnit`, `ReferenceFrameId`, and `CoordinateOriginId`.
 5. **Step 5:** Implement `FramedVector3` and unit conversions.
 6. **Step 6:** Implement `scientific_geometry.dart` barrel export.
