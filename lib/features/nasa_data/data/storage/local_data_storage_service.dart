@@ -82,7 +82,14 @@ class LocalDataStorageService {
     try {
       fileCanonical = file.resolveSymbolicLinksSync();
     } catch (_) {
-      fileCanonical = file.absolute.path;
+      try {
+        fileCanonical =
+            file.parent.resolveSymbolicLinksSync() +
+            Platform.pathSeparator +
+            file.uri.pathSegments.last;
+      } catch (_) {
+        fileCanonical = file.absolute.path;
+      }
     }
 
     if (!fileCanonical.startsWith(completedCanonical)) {
@@ -311,6 +318,16 @@ class LocalDataStorageService {
             0,
             filename.length - '.staged.json'.length,
           );
+          try {
+            _validateProductId(prodId);
+          } catch (e) {
+            AppLogger.warning(
+              'Invalid productId in staged meta filename $filename: $e',
+            );
+            await metaFile.delete();
+            continue;
+          }
+
           final finalMeta = _getMetaFile(prodId);
 
           // If final metadata already exists, staged metadata is redundant
@@ -318,21 +335,38 @@ class LocalDataStorageService {
             await metaFile.delete();
           } else {
             // Interrupted right before rename: verify if staged metadata points to valid asset
-            final jsonStr = await metaFile.readAsString();
-            final record = LocalAssetRecord.tryDeserialize(jsonStr);
-            if (record != null) {
-              final assetFile = File(
-                '${_completedDir.path}${Platform.pathSeparator}${record.relativeFilePath}',
-              );
-              if (await assetFile.exists() &&
-                  (await assetFile.length()) == record.fileSizeBytes) {
-                // Complete the commit
-                await metaFile.rename(finalMeta.path);
-                referencedCompletedFiles.add(record.relativeFilePath);
-                continue;
+            try {
+              final jsonStr = await metaFile.readAsString();
+              final record = LocalAssetRecord.tryDeserialize(jsonStr);
+              if (record != null && record.productId == prodId) {
+                File assetFile;
+                try {
+                  assetFile = _resolveAndValidateCompletedFile(
+                    record.relativeFilePath,
+                  );
+                } catch (e) {
+                  AppLogger.warning(
+                    'Path traversal or invalid path in staged metadata for $prodId: $e',
+                  );
+                  await metaFile.delete();
+                  continue;
+                }
+
+                if (await assetFile.exists() &&
+                    (await assetFile.length()) == record.fileSizeBytes) {
+                  // Complete the commit
+                  await metaFile.rename(finalMeta.path);
+                  referencedCompletedFiles.add(record.relativeFilePath);
+                  continue;
+                }
               }
+              await metaFile.delete();
+            } catch (e) {
+              AppLogger.warning(
+                'Error inspecting staged metadata $filename: $e',
+              );
+              await metaFile.delete();
             }
-            await metaFile.delete();
           }
           continue;
         }
@@ -343,12 +377,32 @@ class LocalDataStorageService {
             filename.length - '.json'.length,
           );
           try {
+            _validateProductId(prodId);
+          } catch (e) {
+            AppLogger.warning(
+              'Invalid productId in meta filename $filename: $e',
+            );
+            await metaFile.delete();
+            continue;
+          }
+
+          try {
             final jsonStr = await metaFile.readAsString();
             final record = LocalAssetRecord.tryDeserialize(jsonStr);
             if (record != null && record.productId == prodId) {
-              final assetFile = File(
-                '${_completedDir.path}${Platform.pathSeparator}${record.relativeFilePath}',
-              );
+              File assetFile;
+              try {
+                assetFile = _resolveAndValidateCompletedFile(
+                  record.relativeFilePath,
+                );
+              } catch (e) {
+                AppLogger.warning(
+                  'Path traversal or invalid path in metadata for $prodId: $e',
+                );
+                await metaFile.delete();
+                continue;
+              }
+
               if (await assetFile.exists() &&
                   (await assetFile.length()) == record.fileSizeBytes) {
                 referencedCompletedFiles.add(record.relativeFilePath);
@@ -360,14 +414,16 @@ class LocalDataStorageService {
                 );
                 if (await legacyBak.exists() &&
                     (await legacyBak.length()) == record.fileSizeBytes) {
-                  // Restore from legacy bak
+                  // Restore from legacy bak (destination assetFile has been validated above)
                   await legacyBak.rename(assetFile.path);
                   referencedCompletedFiles.add(record.relativeFilePath);
                   continue;
                 }
               }
             }
-          } catch (_) {}
+          } catch (e) {
+            AppLogger.warning('Error inspecting metadata $filename: $e');
+          }
         }
       }
 
@@ -381,23 +437,22 @@ class LocalDataStorageService {
               continue;
             }
 
-            // Check if this is an unreferenced generation or legacy .bak or .staged file
-            final isUnreferencedStaged =
-                name.contains('.staged') || name.contains('.staged.');
-            final isGenerationFile = name.contains('_gen');
             final isLegacyBak = name.endsWith('.bak');
-
             // Before deleting a legacy .bak, ensure there is no metadata file that needed it
             if (isLegacyBak) {
               final prodId = name.substring(0, name.length - '.bak'.length);
-              final meta = _getMetaFile(prodId);
-              if (await meta.exists()) {
-                // Keep it if metadata exists
-                continue;
-              }
+              try {
+                _validateProductId(prodId);
+                final meta = _getMetaFile(prodId);
+                if (await meta.exists()) {
+                  // Keep it if metadata exists
+                  continue;
+                }
+              } catch (_) {}
             }
 
-            if (isUnreferencedStaged || isGenerationFile || isLegacyBak) {
+            // Only clean files that match the application's exact generation or staging naming convention
+            if (_isOrphanedApplicationFile(name)) {
               await entity.delete();
             }
           }
@@ -408,6 +463,30 @@ class LocalDataStorageService {
     }
   }
 
+  static final RegExp _generationFilePattern = RegExp(
+    r'^[a-zA-Z0-9_\-]+_gen\d+\.[a-zA-Z0-9]+$',
+  );
+
+  static final RegExp _legacyBakFilePattern = RegExp(r'^[a-zA-Z0-9_\-]+\.bak$');
+
+  static final RegExp _stagedDownloadPattern = RegExp(
+    r'^\.download\.[a-zA-Z0-9_\-]+(\.[a-zA-Z0-9]+)?$',
+  );
+
+  /// Checks if a file strictly matches the application's generation, legacy .bak, or temporary file format.
+  bool _isOrphanedApplicationFile(String fileName) {
+    if (_generationFilePattern.hasMatch(fileName)) {
+      return true;
+    }
+    if (_legacyBakFilePattern.hasMatch(fileName)) {
+      return true;
+    }
+    if (_stagedDownloadPattern.hasMatch(fileName)) {
+      return true;
+    }
+    return false;
+  }
+
   /// Removes older generation asset files for [productId] that are no longer referenced.
   Future<void> _cleanUnreferencedGenerations(
     String productId, {
@@ -416,14 +495,24 @@ class LocalDataStorageService {
     try {
       if (!await _completedDir.exists()) return;
 
+      final prodGenPattern = RegExp(
+        '^${RegExp.escape(productId)}_gen\\d+\\.[a-zA-Z0-9]+\$',
+      );
+
       await for (final entity in _completedDir.list()) {
         if (entity is File) {
           final name = entity.uri.pathSegments.last;
-          if (name != activeRelativeFile &&
-              (name.startsWith('${productId}_gen') ||
-                  name == '$productId.bak' ||
-                  name.startsWith('$productId.staged'))) {
-            await entity.delete();
+          if (name != activeRelativeFile) {
+            final matchesGen = prodGenPattern.hasMatch(name);
+            final isExactBak = name == '$productId.bak';
+            final isStagedDownload =
+                name == '.download.$productId' ||
+                name.startsWith('.download.$productId.') ||
+                name.startsWith('$productId.staged');
+
+            if (matchesGen || isExactBak || isStagedDownload) {
+              await entity.delete();
+            }
           }
         }
       }
