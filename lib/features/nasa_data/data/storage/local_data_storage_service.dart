@@ -27,6 +27,10 @@ class LocalDataStorageService {
   StorageCommitFailurePoint testFailureInjectionPoint =
       StorageCommitFailurePoint.none;
 
+  /// Test-only hook to intercept or inject failures during RandomAccessFile flush.
+  @visibleForTesting
+  Future<void> Function(RandomAccessFile raf)? testFlushInterceptor;
+
   LocalDataStorageService({required this.baseStorageDirectory});
 
   Directory get _completedDir => Directory(
@@ -331,13 +335,11 @@ class LocalDataStorageService {
       final raf = await stagedMetaFile.open(mode: FileMode.write);
       try {
         await raf.writeString(serializedMeta);
-        if (testFailureInjectionPoint ==
-            StorageCommitFailurePoint.stagedMetadataFlush) {
-          throw const NasaStorageFailure(
-            message: 'Injected failure at stagedMetadataFlush',
-          );
+        if (testFlushInterceptor != null) {
+          await testFlushInterceptor!(raf);
+        } else {
+          await raf.flush();
         }
-        await raf.flush();
       } finally {
         await raf.close();
       }

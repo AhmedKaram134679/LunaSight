@@ -863,8 +863,13 @@ void main() {
         expectedSize: 2,
       );
 
-      storage.testFailureInjectionPoint =
-          StorageCommitFailurePoint.stagedMetadataFlush;
+      // Set up genuine failure injection at the metadata flush operation
+      storage.testFlushInterceptor = (raf) async {
+        // Attempt actual flush first or simulate OS/IO exception from within the flush operation
+        throw const FileSystemException(
+          'Injected flush I/O failure from flush operation',
+        );
+      };
 
       final temp2 = storage.getTempFile('fail_c');
       final gen2Bytes = [33, 44, 55];
@@ -880,7 +885,7 @@ void main() {
         throwsA(isA<NasaStorageFailure>()),
       );
 
-      storage.testFailureInjectionPoint = StorageCommitFailurePoint.none;
+      storage.testFlushInterceptor = null;
 
       // 1. Partial/staged metadata was cleaned up
       final stagedMeta = File('${testDir.path}/meta/fail_c.staged.json');
