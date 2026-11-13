@@ -328,15 +328,19 @@ class LocalDataStorageService {
         );
       }
       final serializedMeta = record.serialize();
-      if (testFailureInjectionPoint ==
-          StorageCommitFailurePoint.stagedMetadataFlush) {
-        // Write partial/corrupted content and simulate flush failure
-        await stagedMetaFile.writeAsString(serializedMeta.substring(0, 10));
-        throw const NasaStorageFailure(
-          message: 'Injected failure at stagedMetadataFlush',
-        );
+      final raf = await stagedMetaFile.open(mode: FileMode.write);
+      try {
+        await raf.writeString(serializedMeta);
+        if (testFailureInjectionPoint ==
+            StorageCommitFailurePoint.stagedMetadataFlush) {
+          throw const NasaStorageFailure(
+            message: 'Injected failure at stagedMetadataFlush',
+          );
+        }
+        await raf.flush();
+      } finally {
+        await raf.close();
       }
-      await stagedMetaFile.writeAsString(serializedMeta, flush: true);
 
       // Step 4: Authoritative atomic commit: rename staged metadata over final metadata
       if (testFailureInjectionPoint ==
@@ -369,33 +373,46 @@ class LocalDataStorageService {
 
       // If authoritative metadata was already committed (e.g. failure at postCommitCleanup),
       // we must NOT delete the active generation file or active metadata!
-      final finalMetaExists = await finalMetaFile.exists();
-      if (finalMetaExists) {
-        try {
+      var isAuthoritativelyCommitted = false;
+      try {
+        if (await finalMetaFile.exists()) {
           final jsonStr = await finalMetaFile.readAsString();
           final committedRec = LocalAssetRecord.tryDeserialize(jsonStr);
           if (committedRec != null &&
               committedRec.relativeFilePath == genFileName) {
-            AppLogger.info(
-              'Commit already succeeded for $productId before post-commit failure.',
-            );
-            throw NasaStorageFailure(
-              message: 'Post-commit failure for $productId: $e',
-              cause: e,
-              stackTrace: stack,
-            );
+            isAuthoritativelyCommitted = true;
           }
-        } catch (err) {
-          if (err is NasaStorageFailure) rethrow;
         }
+      } catch (_) {}
+
+      if (isAuthoritativelyCommitted) {
+        AppLogger.info(
+          'Commit already succeeded for $productId before post-commit failure.',
+        );
+        throw NasaStorageFailure(
+          message: 'Post-commit failure for $productId: $e',
+          cause: e,
+          stackTrace: stack,
+        );
       }
 
       // Clean up the newly created generation file so it doesn't leak if uncommitted
-      if (await genAssetFile.exists()) {
-        await genAssetFile.delete();
+      try {
+        if (await genAssetFile.exists()) {
+          await genAssetFile.delete();
+          AppLogger.info(
+            'Deleted uncommitted genAssetFile ${genAssetFile.path}',
+          );
+        }
+      } catch (delErr) {
+        AppLogger.warning('Failed deleting uncommitted genAssetFile: $delErr');
       }
-      if (await stagedMetaFile.exists()) {
-        await stagedMetaFile.delete();
+      try {
+        if (await stagedMetaFile.exists()) {
+          await stagedMetaFile.delete();
+        }
+      } catch (delErr) {
+        AppLogger.warning('Failed deleting stagedMetaFile: $delErr');
       }
 
       throw NasaStorageFailure(

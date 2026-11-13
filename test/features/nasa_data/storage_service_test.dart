@@ -751,9 +751,13 @@ void main() {
       expect(await storage.getVerifiedAsset('sym_ext'), isNull);
       expect(await storage.getVerifiedAsset('sym_dangling'), isNull);
 
-      // Verify external sentinel file remains byte-for-byte unchanged
+      // Verify external sentinel file and external evil file remain byte-for-byte unchanged
       expect(await sentinel.exists(), isTrue);
       expect(await sentinel.readAsString(), 'CRITICAL_SENTINEL_SYM');
+      expect(await evilTarget.exists(), isTrue);
+      expect(await evilTarget.readAsBytes(), [9, 9, 9]);
+      expect(await extFile.exists(), isTrue);
+      expect(await extFile.readAsBytes(), [1, 1]);
     });
 
     // Actual commitAsset() Failure-Injection Tests
@@ -763,7 +767,8 @@ void main() {
           StorageCommitFailurePoint.generationAssetRename;
 
       final temp = storage.getTempFile('fail_a');
-      await temp.writeAsBytes([1, 2, 3]);
+      final tempPayload = [1, 2, 3];
+      await temp.writeAsBytes(tempPayload);
 
       await expectLater(
         () => storage.commitAsset(
@@ -778,12 +783,30 @@ void main() {
       // Reset failure point
       storage.testFailureInjectionPoint = StorageCommitFailurePoint.none;
 
-      // Uncommitted product returns null
+      // 1. Verify original temporary file still exists and exact bytes remain unchanged
+      expect(await temp.exists(), isTrue);
+      expect(await temp.readAsBytes(), tempPayload);
+
+      // 2. Verify no uncommitted generation asset was created in completed directory
+      final completedDir = Directory('${testDir.path}/completed');
+      final completedFiles = completedDir
+          .listSync()
+          .whereType<File>()
+          .where((f) => f.uri.pathSegments.last.startsWith('fail_a_gen'))
+          .toList();
+      expect(completedFiles, isEmpty);
+
+      // 3. Verify no authoritative metadata points to failed generation
+      final metaFile = File('${testDir.path}/meta/fail_a.json');
+      expect(await metaFile.exists(), isFalse);
+
+      // 4. Uncommitted product returns null
       expect(await storage.getVerifiedAsset('fail_a'), isNull);
 
-      // Recovery remains idempotent
+      // 5. Recovery remains safe and idempotent
       await storage.recoverStorageState();
       expect(await storage.getVerifiedAsset('fail_a'), isNull);
+      expect(await temp.exists(), isTrue);
     });
 
     test('Failure Injection Point B: stagedMetadataWrite failure preserves old generation and cleans staged', () async {
@@ -833,7 +856,7 @@ void main() {
       final temp1 = storage.getTempFile('fail_c');
       final gen1Bytes = [11, 22];
       await temp1.writeAsBytes(gen1Bytes);
-      await storage.commitAsset(
+      final meta1 = await storage.commitAsset(
         productId: 'fail_c',
         tempFile: temp1,
         fileExtension: 'tif',
@@ -844,7 +867,8 @@ void main() {
           StorageCommitFailurePoint.stagedMetadataFlush;
 
       final temp2 = storage.getTempFile('fail_c');
-      await temp2.writeAsBytes([33, 44, 55]);
+      final gen2Bytes = [33, 44, 55];
+      await temp2.writeAsBytes(gen2Bytes);
 
       await expectLater(
         () => storage.commitAsset(
@@ -858,14 +882,42 @@ void main() {
 
       storage.testFailureInjectionPoint = StorageCommitFailurePoint.none;
 
-      // Old generation remains active
-      final verified = await storage.getVerifiedAsset('fail_c');
-      expect(verified, isNotNull);
-      expect(verified!.fileSizeBytes, 2);
-      expect(await File(verified.localFilePath).readAsBytes(), gen1Bytes);
-
+      // 1. Partial/staged metadata was cleaned up
       final stagedMeta = File('${testDir.path}/meta/fail_c.staged.json');
       expect(await stagedMeta.exists(), isFalse);
+
+      // 2. Previously committed Generation 1 remains active and byte-for-byte unchanged
+      final verified = await storage.getVerifiedAsset('fail_c');
+      expect(verified, isNotNull);
+      expect(verified!.localFilePath, meta1.localFilePath);
+      expect(verified.fileSizeBytes, 2);
+      expect(await File(verified.localFilePath).readAsBytes(), gen1Bytes);
+
+      // 3. Generation 2 is not exposed as committed
+      expect(verified.fileSizeBytes, isNot(equals(3)));
+
+      // 4. Uncommitted Gen 2 asset file cleaned up
+      final completedDir = Directory('${testDir.path}/completed');
+      final gen1Canonical = File(meta1.localFilePath)
+          .resolveSymbolicLinksSync();
+      final completedGen2Files = completedDir
+          .listSync()
+          .whereType<File>()
+          .where(
+            (f) =>
+                f.resolveSymbolicLinksSync() != gen1Canonical &&
+                f.uri.pathSegments.last.startsWith('fail_c_gen'),
+          )
+          .toList();
+      expect(completedGen2Files, isEmpty);
+
+      // 5. Subsequent recoverStorageState() is safe and idempotent
+      await storage.recoverStorageState();
+      final afterRecovery = await storage.getVerifiedAsset('fail_c');
+      expect(afterRecovery, isNotNull);
+      expect(afterRecovery!.localFilePath, meta1.localFilePath);
+      expect(afterRecovery.fileSizeBytes, 2);
+      expect(await File(afterRecovery.localFilePath).readAsBytes(), gen1Bytes);
     });
 
     test('Failure Injection Point D: authoritativeMetadataRename failure preserves old generation and cleans uncommitted Gen 2', () async {
