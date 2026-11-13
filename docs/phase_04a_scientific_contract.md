@@ -351,16 +351,20 @@ Previous drafts listed numerical thresholds without complete derivations. The ph
 #### 1. Zero-Vector Norm Threshold ($\epsilon_{\text{zero}}$) — `UNRESOLVED` (Illustrative: $1.0 \times 10^{-12}\text{ m}$)
 - **Distinction between Normal/Subnormal Range vs Coordinate Resolution:**
   IEEE-754 double precision (binary64) defines:
-  - Minimum positive normal value: $\sim 2.23 \times 10^{-308}$
-  - Minimum positive subnormal value: $\sim 4.94 \times 10^{-324}$
+  - Minimum positive normal value: $2^{-1022} \approx 2.225 \times 10^{-308}$
+  - Minimum positive subnormal value: $2^{-1074} \approx 4.941 \times 10^{-324}$
   However, avoiding floating-point underflow does **not** guarantee numerical coordinate resolution.
-- **Coordinate Spacing at Lunar Scale vs Local Displacements:**
-  - For selenocentric coordinates ($\|\vec{r}\| \sim 1.74 \times 10^6\text{ m}$), unit in the last place ($\text{ULP}$) is:
-    $$\text{ULP}(1.74 \times 10^6\text{ m}) = 2^{-52} \times 2^{\lfloor \log_2(1.74 \times 10^6) \rfloor} \approx 4.66 \times 10^{-10}\text{ m}$$
-  - A difference vector obtained by subtracting two large selenocentric coordinates cannot resolve physical differences below $\sim 4.7 \times 10^{-10}\text{ m}$.
-  - Conversely, for local topocentric displacement vectors formulated directly in the observer frame, coordinate values are much smaller, allowing finer resolution.
-  - Therefore, a single absolute threshold like $1.0 \times 10^{-12}\text{ m}$ cannot serve as a universal normalization threshold for both large-scale coordinate differences and local displacements.
-  - *Status:* **UNRESOLVED** (A dual or relative threshold strategy—e.g. scale-relative $\epsilon_{\text{rel}} \cdot \|\vec{r}\|$ for large vectors and absolute $\epsilon_{\text{abs}}$ for local vectors—must be derived in Phase 04B).
+- **Binary64 Spacing at Lunar Scale vs Local Displacements:**
+  - For a coordinate magnitude near the lunar radius, $x \approx 1.74 \times 10^6\text{ m}$, the value falls in the binade $[2^{20}, 2^{21})$ since $2^{20} = 1,048,576$ and $2^{21} = 2,097,152$.
+  - With a 53-bit significand (52 explicit fraction bits), the spacing between adjacent representable binary64 floating-point numbers in this binade is:
+    $$\text{ULP}(1.74 \times 10^6\text{ m}) = 2^{20 - 52} = 2^{-32} \approx 2.3283064365 \times 10^{-10}\text{ m}$$
+  - **Important Architectural Invariant:** Representable-number spacing ($\text{ULP}$) at a given magnitude must not be conflated with a universal limit on physical coordinate resolution:
+    - *Rounding of independent coordinates:* Individual coordinate components stored near lunar radius have an initial representation quantization on the order of $\frac{1}{2}\text{ULP} \approx 1.16 \times 10^{-10}\text{ m}$.
+    - *Subtraction of nearby large coordinates:* When two nearby selenocentric position vectors $\vec{r}_1, \vec{r}_2$ with magnitudes $\sim 1.74 \times 10^6\text{ m}$ are subtracted to form a relative displacement $\Delta\vec{r} = \vec{r}_2 - \vec{r}_1$, severe catastrophic cancellation can occur. If the difference is small, the low-order bits containing the difference are affected by the initial representation rounding of the large coordinates ($\sim 2.33 \times 10^{-10}\text{ m}$), and subsequent floating-point arithmetic further accumulates error.
+    - *Local topocentric displacement vectors:* If displacements are formulated directly in a topocentric frame centered at the landing site (where coordinates represent local meters or kilometers rather than selenocentric radii), the magnitudes are small (e.g. $\|\vec{d}\| \in [0, 10^3]\text{ m}$), where $\text{ULP}(10^3\text{ m}) = 2^{9 - 52} = 2^{-43} \approx 1.14 \times 10^{-13}\text{ m}$.
+    - *Sequence of operations:* The actual precision of any computed vector depends fundamentally on the coordinate representation chosen, the mathematical formulation of the displacement, and the exact sequence of floating-point operations.
+  - Consequently, a single universal absolute threshold (such as $1.0 \times 10^{-12}\text{ m}$) cannot be defended as a universal zero-vector normalization cutoff across both large-scale coordinate subtractions and local topocentric displacements.
+  - *Status:* **UNRESOLVED** (The zero-vector normalization cutoff strategy—whether scale-relative $\epsilon_{\text{rel}} \cdot \|\vec{r}\|$ or separated by coordinate domain—must be rigorously derived in Phase 04B).
 
 #### 2. Polar Singularity Angle Threshold ($\epsilon_{\text{pole}}$) — `PROPOSED` ($1.0 \times 10^{-7}\text{ rad}$)
 - **Dimensional Scale:** At the lunar radius $R_L \approx 1,737.4\text{ km}$, an angular offset of $1.0 \times 10^{-7}\text{ rad}$ corresponds to a surface displacement:
@@ -379,10 +383,10 @@ Previous drafts listed numerical thresholds without complete derivations. The ph
     $$\epsilon_{\text{ortho}} = \|R^T R - I\|_{\infty}$$
   - Positional round-trip error is measured in meters:
     $$\Delta r = \|R^T (R \vec{r}) - \vec{r}\|$$
-  - Testing $R^T R = I$ evaluates purely algebraic matrix orthogonality, which does not prove a fixed $1\ \mu\text{m}$ positional error for vectors of arbitrary magnitude. Positional error scales with vector magnitude $\|\vec{r}\|$ and accumulates with repeated rotations.
-  - For a lunar radius vector ($\|\vec{r}\| \approx 1.74 \times 10^6\text{ m}$), double precision roundoff yields an intrinsic single-transform bound:
-    $$\Delta r_{\text{bound}} \sim \text{ULP}(1.74 \times 10^6\text{ m}) \approx 4.7 \times 10^{-10}\text{ m}$$
-- *Status:* Orthogonality metric is **PROPOSED**; positional round-trip threshold across mission trajectories is **UNRESOLVED**.
+  - Testing $R^T R = I$ evaluates purely algebraic matrix orthogonality and numerical conditioning. It does **not** prove a universal positional bound (such as $1\ \mu\text{m}$) for transformed vectors.
+  - The actual positional error resulting from matrix transformations depends on the vector magnitude $\|\vec{r}\|$, the specific rotational matrix properties, the rounding errors accumulated across the sequence of arithmetic operations (e.g., matrix-vector multiplication involves 9 multiplications and 6 additions), and the number of sequential transformations.
+  - A single floating-point ULP value is not, by itself, a rigorous upper bound for the positional error of a matrix transformation or round-trip transformation. Any rigorous positional error bound must be derived from an explicit Wilkinson-style floating-point error analysis for the concrete transformation sequence.
+- *Status:* Matrix orthogonality metric ($\epsilon_{\text{ortho}} = 1.0 \times 10^{-15}$) is **PROPOSED**; positional round-trip error threshold ($\Delta r$) across mission trajectories is **UNRESOLVED**.
 
 #### 5. Horizons Acceptance Tolerance ($\Delta\theta$) — `UNRESOLVED` (Illustrative: $0.01°$)
 - An application accuracy target (e.g. $0.01° = 36''$) cannot be treated as a verified scientific tolerance until comparison methodology explicitly models and reconciles:
@@ -397,11 +401,11 @@ Previous drafts listed numerical thresholds without complete derivations. The ph
 
 | Threshold / Parameter | Value / Target | Category | Basis / Status Summary |
 |:---|:---:|:---:|:---|
-| **Zero-Vector Norm Threshold** ($\epsilon_{\text{zero}}$) | $1.0 \times 10^{-12}\text{ m}$ (Illustrative) | **UNRESOLVED** | Coordinate spacing at lunar scale ($\text{ULP} \sim 4.7 \times 10^{-10}\text{ m}$) differs from local displacement vectors; requires dual/relative threshold strategy. |
+| **Zero-Vector Norm Threshold** ($\epsilon_{\text{zero}}$) | $1.0 \times 10^{-12}\text{ m}$ (Illustrative) | **UNRESOLVED** | Coordinate spacing at lunar scale ($\text{ULP} = 2^{-32}\text{ m} \approx 2.33 \times 10^{-10}\text{ m}$) differs from local displacement vectors; requires dual/relative threshold strategy. |
 | **Polar Singularity Angle** ($\epsilon_{\text{pole}}$) | $1.0 \times 10^{-7}\text{ rad}$ ($\sim 0.17\text{ m}$) | **PROPOSED** | Scale-dependent; requires numerical stability validation of trigonometric projections near pole. |
 | **Zenith Azimuth Indeterminacy** ($\cos\text{EL}$) | $1.0 \times 10^{-6}$ | **PROPOSED** | Governs numerical conditioning of $\text{atan2}(E, N)$ as horizontal projection vanishes. |
 | **Matrix Orthogonality Loss** ($\epsilon_{\text{ortho}}$) | $1.0 \times 10^{-15}$ | **PROPOSED** | Dimensionless metric $\|R^T R - I\|_\infty$ testing algebraic orthogonality. |
-| **Positional Frame Transform Loss** ($\Delta r$) | Dependent on $\|\vec{r}\|$ | **UNRESOLVED** | Positional error scales with vector magnitude and accumulated rotations; cannot be fixed universally to $1\ \mu\text{m}$. |
+| **Positional Frame Transform Loss** ($\Delta r$) | Dependent on $\|\vec{r}\|$ | **UNRESOLVED** | Positional error scales with vector magnitude and accumulated transformation arithmetic; cannot be bounded by ULP alone or fixed universally to $1\ \mu\text{m}$. |
 | **Horizons Acceptance Tolerance** ($\Delta\theta$) | $0.01°$ (Illustrative target) | **UNRESOLVED** | Requires reconciliation of light-time, aberration, gravity deflection, and vertical datum before tolerance is locked. |
 
 *Rule:* None of the above thresholds shall become locked project contracts until the specified numerical and empirical verification tests have been executed and documented.
