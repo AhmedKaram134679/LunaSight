@@ -2,14 +2,30 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart';
 import 'package:luna_sight/core/logging/app_logger.dart';
 import 'package:luna_sight/features/nasa_data/data/models/local_asset_record.dart';
 import 'package:luna_sight/features/nasa_data/domain/entities/acquisition_status.dart';
 import 'package:luna_sight/features/nasa_data/domain/failures/nasa_data_failures.dart';
 
+/// Internal failure injection hook for verifying transactional boundaries.
+enum StorageCommitFailurePoint {
+  none,
+  generationAssetRename,
+  stagedMetadataWrite,
+  stagedMetadataFlush,
+  authoritativeMetadataRename,
+  postCommitCleanup,
+}
+
 /// Manages local disk storage, generation-tracked atomic commits, crash recovery, and integrity.
 class LocalDataStorageService {
   final Directory baseStorageDirectory;
+
+  /// Test-only injection hook to verify crash points deterministically.
+  @visibleForTesting
+  StorageCommitFailurePoint testFailureInjectionPoint =
+      StorageCommitFailurePoint.none;
 
   LocalDataStorageService({required this.baseStorageDirectory});
 
@@ -60,8 +76,30 @@ class LocalDataStorageService {
     }
   }
 
+  /// Checks if [childPath] is strictly located within [parentDirectoryPath]
+  /// ensuring directory boundary safety and preventing sibling-directory prefix collisions.
+  static bool _isPathWithinDirectory(
+    String parentDirectoryPath,
+    String childPath,
+  ) {
+    final sep = Platform.pathSeparator;
+    final normalizedParent = parentDirectoryPath.endsWith(sep)
+        ? parentDirectoryPath
+        : '$parentDirectoryPath$sep';
+
+    if (Platform.isWindows) {
+      return childPath.toLowerCase().startsWith(
+            normalizedParent.toLowerCase(),
+          ) &&
+          childPath.length > normalizedParent.length;
+    }
+    return childPath.startsWith(normalizedParent) &&
+        childPath.length > normalizedParent.length;
+  }
+
   /// Validates that a filename/relative path is strictly a single filename
-  /// within the completed directory and does not traverse outward.
+  /// within the completed directory, enforces strict canonical directory boundary,
+  /// and resolves/rejects symbolic links targeting outside the completed directory.
   File _resolveAndValidateCompletedFile(String relativeFilePath) {
     if (relativeFilePath.contains('..') ||
         relativeFilePath.contains('/') ||
@@ -76,23 +114,43 @@ class LocalDataStorageService {
     final file = File(
       '${_completedDir.path}${Platform.pathSeparator}$relativeFilePath',
     );
-
     final completedCanonical = _completedDir.resolveSymbolicLinksSync();
+
+    // Check if the entity is a symlink (without traversing it first)
+    final entityType = FileSystemEntity.typeSync(file.path, followLinks: false);
+    if (entityType == FileSystemEntityType.link) {
+      String resolvedSymlinkTarget;
+      try {
+        resolvedSymlinkTarget = file.resolveSymbolicLinksSync();
+      } catch (e) {
+        throw NasaStorageFailure(
+          message:
+              'Dangling or unresolvable symlink rejected: "$relativeFilePath"',
+        );
+      }
+      if (!_isPathWithinDirectory(completedCanonical, resolvedSymlinkTarget)) {
+        throw NasaStorageFailure(
+          message:
+              'Symlink target outside canonical completed storage directory: "$relativeFilePath" -> "$resolvedSymlinkTarget"',
+        );
+      }
+    }
+
     String fileCanonical;
     try {
       fileCanonical = file.resolveSymbolicLinksSync();
     } catch (_) {
       try {
         fileCanonical =
-            file.parent.resolveSymbolicLinksSync() +
-            Platform.pathSeparator +
-            file.uri.pathSegments.last;
+            '${file.parent.resolveSymbolicLinksSync()}${Platform.pathSeparator}${file.uri.pathSegments.last}';
       } catch (_) {
         fileCanonical = file.absolute.path;
       }
     }
 
-    if (!fileCanonical.startsWith(completedCanonical)) {
+    // Strict directory boundary check preventing sibling-directory prefix collisions
+    // e.g., /storage/completed vs /storage/completed_evil
+    if (!_isPathWithinDirectory(completedCanonical, fileCanonical)) {
       throw NasaStorageFailure(
         message:
             'Target file outside completed storage directory: "$relativeFilePath"',
@@ -236,6 +294,12 @@ class LocalDataStorageService {
     );
 
     // Step 1: Move temp file to generation asset file
+    if (testFailureInjectionPoint ==
+        StorageCommitFailurePoint.generationAssetRename) {
+      throw const NasaStorageFailure(
+        message: 'Injected failure at generationAssetRename',
+      );
+    }
     await tempFile.rename(genAssetFile.path);
 
     // Step 2: Prepare new metadata record pointing to this generation file
@@ -257,12 +321,39 @@ class LocalDataStorageService {
 
     try {
       // Step 3: Write staged metadata file and flush
-      await stagedMetaFile.writeAsString(record.serialize(), flush: true);
+      if (testFailureInjectionPoint ==
+          StorageCommitFailurePoint.stagedMetadataWrite) {
+        throw const NasaStorageFailure(
+          message: 'Injected failure at stagedMetadataWrite',
+        );
+      }
+      final serializedMeta = record.serialize();
+      if (testFailureInjectionPoint ==
+          StorageCommitFailurePoint.stagedMetadataFlush) {
+        // Write partial/corrupted content and simulate flush failure
+        await stagedMetaFile.writeAsString(serializedMeta.substring(0, 10));
+        throw const NasaStorageFailure(
+          message: 'Injected failure at stagedMetadataFlush',
+        );
+      }
+      await stagedMetaFile.writeAsString(serializedMeta, flush: true);
 
       // Step 4: Authoritative atomic commit: rename staged metadata over final metadata
+      if (testFailureInjectionPoint ==
+          StorageCommitFailurePoint.authoritativeMetadataRename) {
+        throw const NasaStorageFailure(
+          message: 'Injected failure at authoritativeMetadataRename',
+        );
+      }
       await stagedMetaFile.rename(finalMetaFile.path);
 
       // Step 5: Post-commit cleanup: remove any older generation files or legacy unreferenced files for this product
+      if (testFailureInjectionPoint ==
+          StorageCommitFailurePoint.postCommitCleanup) {
+        throw const NasaStorageFailure(
+          message: 'Injected failure at postCommitCleanup',
+        );
+      }
       await _cleanUnreferencedGenerations(
         productId,
         activeRelativeFile: genFileName,
@@ -276,7 +367,30 @@ class LocalDataStorageService {
         stackTrace: stack,
       );
 
-      // Clean up the newly created generation file so it doesn't leak
+      // If authoritative metadata was already committed (e.g. failure at postCommitCleanup),
+      // we must NOT delete the active generation file or active metadata!
+      final finalMetaExists = await finalMetaFile.exists();
+      if (finalMetaExists) {
+        try {
+          final jsonStr = await finalMetaFile.readAsString();
+          final committedRec = LocalAssetRecord.tryDeserialize(jsonStr);
+          if (committedRec != null &&
+              committedRec.relativeFilePath == genFileName) {
+            AppLogger.info(
+              'Commit already succeeded for $productId before post-commit failure.',
+            );
+            throw NasaStorageFailure(
+              message: 'Post-commit failure for $productId: $e',
+              cause: e,
+              stackTrace: stack,
+            );
+          }
+        } catch (err) {
+          if (err is NasaStorageFailure) rethrow;
+        }
+      }
+
+      // Clean up the newly created generation file so it doesn't leak if uncommitted
       if (await genAssetFile.exists()) {
         await genAssetFile.delete();
       }

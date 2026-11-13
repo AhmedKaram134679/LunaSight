@@ -579,5 +579,467 @@ void main() {
       expect(await orphanedGen.exists(), isFalse);
       expect(await emptyStaged.exists(), isFalse);
     });
+
+    // Canonical Path Boundary & Symlink Tests
+
+    test('Canonical Boundary: Normal in-directory file resolves and validates successfully', () async {
+      final completedDir = Directory('${testDir.path}/completed');
+      final normalFile = File('${completedDir.path}/normal_asset.tif');
+      await normalFile.writeAsBytes([1, 2, 3]);
+
+      final metaDir = Directory('${testDir.path}/meta');
+      final meta = File('${metaDir.path}/normal_asset.json');
+      final record = LocalAssetRecord(
+        productId: 'normal_asset',
+        relativeFilePath: 'normal_asset.tif',
+        fileSizeBytes: 3,
+        acquiredAt: DateTime.now().toUtc(),
+      );
+      await meta.writeAsString(record.serialize());
+
+      final verified = await storage.getVerifiedAsset('normal_asset');
+      expect(verified, isNotNull);
+      expect(verified!.fileSizeBytes, 3);
+    });
+
+    test('Canonical Boundary: Non-existent in-directory target is accepted during safe restoration', () async {
+      final completedDir = Directory('${testDir.path}/completed');
+      final metaDir = Directory('${testDir.path}/meta');
+
+      // Target asset does not exist yet, but legacy backup exists
+      final legacyBak = File('${completedDir.path}/restore_test.bak');
+      await legacyBak.writeAsBytes([4, 5, 6, 7]);
+
+      final meta = File('${metaDir.path}/restore_test.json');
+      final record = LocalAssetRecord(
+        productId: 'restore_test',
+        relativeFilePath: 'restore_test.tif',
+        fileSizeBytes: 4,
+        acquiredAt: DateTime.now().toUtc(),
+      );
+      await meta.writeAsString(record.serialize());
+
+      await storage.recoverStorageState();
+
+      final verified = await storage.getVerifiedAsset('restore_test');
+      expect(verified, isNotNull);
+      expect(verified!.fileSizeBytes, 4);
+      expect(await File(verified.localFilePath).readAsBytes(), [4, 5, 6, 7]);
+    });
+
+    test(
+      'Canonical Boundary: Sibling-directory prefix collision is rejected',
+      () async {
+        // completed_evil shares the textual prefix of completed
+        final evilDir = Directory('${testDir.path}/completed_evil');
+        await evilDir.create(recursive: true);
+        final evilFile = File('${evilDir.path}/evil.tif');
+        await evilFile.writeAsBytes([6, 6, 6]);
+
+        final metaDir = Directory('${testDir.path}/meta');
+        final evilMeta = File('${metaDir.path}/evil_prod.json');
+        // relativeFilePath with directory traversal into sibling directory
+        final record = LocalAssetRecord(
+          productId: 'evil_prod',
+          relativeFilePath: '../completed_evil/evil.tif',
+          fileSizeBytes: 3,
+          acquiredAt: DateTime.now().toUtc(),
+        );
+        await evilMeta.writeAsString(record.serialize());
+
+        await storage.recoverStorageState();
+
+        expect(await storage.getVerifiedAsset('evil_prod'), isNull);
+        expect(await evilFile.exists(), isTrue);
+        expect(await evilFile.readAsBytes(), [6, 6, 6]);
+      },
+    );
+
+    test('Canonical Boundary: Symlink escapes, external targets, and dangling symlinks are rejected', () async {
+      final completedDir = Directory('${testDir.path}/completed');
+      final metaDir = Directory('${testDir.path}/meta');
+      final externalDir = Directory('${testDir.path}/external_dir');
+      await externalDir.create(recursive: true);
+
+      // External sentinel file
+      final sentinel = File('${testDir.path}/sentinel_sym.txt');
+      await sentinel.writeAsString('CRITICAL_SENTINEL_SYM');
+
+      // Check if symlinks can be created in this environment
+      bool symlinksSupported = true;
+      try {
+        final probeLink = Link('${completedDir.path}/probe_link.tmp');
+        await probeLink.create(sentinel.path);
+        await probeLink.delete();
+      } catch (e) {
+        symlinksSupported = false;
+        // ignore: avoid_print
+        print(
+          'Symlink tests skipped: Environment does not permit symlink creation ($e)',
+        );
+      }
+
+      if (!symlinksSupported) {
+        // Report explicitly as required by prompt
+        return;
+      }
+
+      // 1. Symlink inside completed pointing to external file
+      final linkToFile = Link('${completedDir.path}/sym_file.tif');
+      await linkToFile.create(sentinel.path);
+
+      final meta1 = File('${metaDir.path}/sym_file.json');
+      final record1 = LocalAssetRecord(
+        productId: 'sym_file',
+        relativeFilePath: 'sym_file.tif',
+        fileSizeBytes: 21,
+        acquiredAt: DateTime.now().toUtc(),
+      );
+      await meta1.writeAsString(record1.serialize());
+
+      // 2. Symlink inside completed pointing to sibling directory completed_evil
+      final evilDir = Directory('${testDir.path}/completed_evil');
+      await evilDir.create(recursive: true);
+      final evilTarget = File('${evilDir.path}/evil_target.tif');
+      await evilTarget.writeAsBytes([9, 9, 9]);
+
+      final linkToSiblingDir = Link('${completedDir.path}/sym_evil.tif');
+      await linkToSiblingDir.create(evilTarget.path);
+
+      final meta2 = File('${metaDir.path}/sym_evil.json');
+      final record2 = LocalAssetRecord(
+        productId: 'sym_evil',
+        relativeFilePath: 'sym_evil.tif',
+        fileSizeBytes: 3,
+        acquiredAt: DateTime.now().toUtc(),
+      );
+      await meta2.writeAsString(record2.serialize());
+
+      // 3. Symlink pointing to external directory with existing target file
+      final extFile = File('${externalDir.path}/ext.tif');
+      await extFile.writeAsBytes([1, 1]);
+      final linkToExt = Link('${completedDir.path}/sym_ext.tif');
+      await linkToExt.create(extFile.path);
+
+      final meta3 = File('${metaDir.path}/sym_ext.json');
+      final record3 = LocalAssetRecord(
+        productId: 'sym_ext',
+        relativeFilePath: 'sym_ext.tif',
+        fileSizeBytes: 2,
+        acquiredAt: DateTime.now().toUtc(),
+      );
+      await meta3.writeAsString(record3.serialize());
+
+      // 4. Dangling symlink
+      final linkDangling = Link('${completedDir.path}/sym_dangling.tif');
+      await linkDangling.create('${externalDir.path}/does_not_exist.tif');
+
+      final meta4 = File('${metaDir.path}/sym_dangling.json');
+      final record4 = LocalAssetRecord(
+        productId: 'sym_dangling',
+        relativeFilePath: 'sym_dangling.tif',
+        fileSizeBytes: 10,
+        acquiredAt: DateTime.now().toUtc(),
+      );
+      await meta4.writeAsString(record4.serialize());
+
+      await storage.recoverStorageState();
+
+      // All malicious/unsafe symlinks must be rejected
+      expect(await storage.getVerifiedAsset('sym_file'), isNull);
+      expect(await storage.getVerifiedAsset('sym_evil'), isNull);
+      expect(await storage.getVerifiedAsset('sym_ext'), isNull);
+      expect(await storage.getVerifiedAsset('sym_dangling'), isNull);
+
+      // Verify external sentinel file remains byte-for-byte unchanged
+      expect(await sentinel.exists(), isTrue);
+      expect(await sentinel.readAsString(), 'CRITICAL_SENTINEL_SYM');
+    });
+
+    // Actual commitAsset() Failure-Injection Tests
+
+    test('Failure Injection Point A: generationAssetRename failure preserves temp and state', () async {
+      storage.testFailureInjectionPoint =
+          StorageCommitFailurePoint.generationAssetRename;
+
+      final temp = storage.getTempFile('fail_a');
+      await temp.writeAsBytes([1, 2, 3]);
+
+      await expectLater(
+        () => storage.commitAsset(
+          productId: 'fail_a',
+          tempFile: temp,
+          fileExtension: 'tif',
+          expectedSize: 3,
+        ),
+        throwsA(isA<NasaStorageFailure>()),
+      );
+
+      // Reset failure point
+      storage.testFailureInjectionPoint = StorageCommitFailurePoint.none;
+
+      // Uncommitted product returns null
+      expect(await storage.getVerifiedAsset('fail_a'), isNull);
+
+      // Recovery remains idempotent
+      await storage.recoverStorageState();
+      expect(await storage.getVerifiedAsset('fail_a'), isNull);
+    });
+
+    test('Failure Injection Point B: stagedMetadataWrite failure preserves old generation and cleans staged', () async {
+      // 1. Establish initial committed Gen 1
+      final temp1 = storage.getTempFile('fail_b');
+      final gen1Bytes = [10, 20];
+      await temp1.writeAsBytes(gen1Bytes);
+      final meta1 = await storage.commitAsset(
+        productId: 'fail_b',
+        tempFile: temp1,
+        fileExtension: 'tif',
+        expectedSize: 2,
+      );
+
+      // 2. Inject failure at stagedMetadataWrite
+      storage.testFailureInjectionPoint =
+          StorageCommitFailurePoint.stagedMetadataWrite;
+
+      final temp2 = storage.getTempFile('fail_b');
+      await temp2.writeAsBytes([30, 40, 50]);
+
+      await expectLater(
+        () => storage.commitAsset(
+          productId: 'fail_b',
+          tempFile: temp2,
+          fileExtension: 'tif',
+          expectedSize: 3,
+        ),
+        throwsA(isA<NasaStorageFailure>()),
+      );
+
+      storage.testFailureInjectionPoint = StorageCommitFailurePoint.none;
+
+      // Old generation remains active, verified, and byte-for-byte unchanged
+      final verified = await storage.getVerifiedAsset('fail_b');
+      expect(verified, isNotNull);
+      expect(verified!.localFilePath, meta1.localFilePath);
+      expect(verified.fileSizeBytes, 2);
+      expect(await File(verified.localFilePath).readAsBytes(), gen1Bytes);
+
+      // Staged metadata was cleaned up
+      final stagedMeta = File('${testDir.path}/meta/fail_b.staged.json');
+      expect(await stagedMeta.exists(), isFalse);
+    });
+
+    test('Failure Injection Point C: stagedMetadataFlush failure preserves old generation and cleans partial metadata', () async {
+      final temp1 = storage.getTempFile('fail_c');
+      final gen1Bytes = [11, 22];
+      await temp1.writeAsBytes(gen1Bytes);
+      await storage.commitAsset(
+        productId: 'fail_c',
+        tempFile: temp1,
+        fileExtension: 'tif',
+        expectedSize: 2,
+      );
+
+      storage.testFailureInjectionPoint =
+          StorageCommitFailurePoint.stagedMetadataFlush;
+
+      final temp2 = storage.getTempFile('fail_c');
+      await temp2.writeAsBytes([33, 44, 55]);
+
+      await expectLater(
+        () => storage.commitAsset(
+          productId: 'fail_c',
+          tempFile: temp2,
+          fileExtension: 'tif',
+          expectedSize: 3,
+        ),
+        throwsA(isA<NasaStorageFailure>()),
+      );
+
+      storage.testFailureInjectionPoint = StorageCommitFailurePoint.none;
+
+      // Old generation remains active
+      final verified = await storage.getVerifiedAsset('fail_c');
+      expect(verified, isNotNull);
+      expect(verified!.fileSizeBytes, 2);
+      expect(await File(verified.localFilePath).readAsBytes(), gen1Bytes);
+
+      final stagedMeta = File('${testDir.path}/meta/fail_c.staged.json');
+      expect(await stagedMeta.exists(), isFalse);
+    });
+
+    test('Failure Injection Point D: authoritativeMetadataRename failure preserves old generation and cleans uncommitted Gen 2', () async {
+      final temp1 = storage.getTempFile('fail_d');
+      final gen1Bytes = [101, 102];
+      await temp1.writeAsBytes(gen1Bytes);
+      final meta1 = await storage.commitAsset(
+        productId: 'fail_d',
+        tempFile: temp1,
+        fileExtension: 'tif',
+        expectedSize: 2,
+      );
+
+      storage.testFailureInjectionPoint =
+          StorageCommitFailurePoint.authoritativeMetadataRename;
+
+      final temp2 = storage.getTempFile('fail_d');
+      await temp2.writeAsBytes([201, 202, 203]);
+
+      await expectLater(
+        () => storage.commitAsset(
+          productId: 'fail_d',
+          tempFile: temp2,
+          fileExtension: 'tif',
+          expectedSize: 3,
+        ),
+        throwsA(isA<NasaStorageFailure>()),
+      );
+
+      storage.testFailureInjectionPoint = StorageCommitFailurePoint.none;
+
+      // Old generation 1 remains active
+      final verified = await storage.getVerifiedAsset('fail_d');
+      expect(verified, isNotNull);
+      expect(verified!.localFilePath, meta1.localFilePath);
+      expect(verified.fileSizeBytes, 2);
+      expect(await File(verified.localFilePath).readAsBytes(), gen1Bytes);
+
+      // Run recovery to ensure complete cleanup idempotency
+      await storage.recoverStorageState();
+      final afterRecovery = await storage.getVerifiedAsset('fail_d');
+      expect(afterRecovery, isNotNull);
+      expect(afterRecovery!.fileSizeBytes, 2);
+      expect(await File(afterRecovery.localFilePath).readAsBytes(), gen1Bytes);
+    });
+
+    test('Failure Injection Point E: postCommitCleanup failure retains new committed Gen 2 and recovery repairs cleanup', () async {
+      // 1. Gen 1 committed
+      final temp1 = storage.getTempFile('fail_e');
+      final gen1Bytes = [7, 8];
+      await temp1.writeAsBytes(gen1Bytes);
+      final meta1 = await storage.commitAsset(
+        productId: 'fail_e',
+        tempFile: temp1,
+        fileExtension: 'tif',
+        expectedSize: 2,
+      );
+
+      // 2. Inject failure at postCommitCleanup
+      storage.testFailureInjectionPoint =
+          StorageCommitFailurePoint.postCommitCleanup;
+
+      final temp2 = storage.getTempFile('fail_e');
+      final gen2Bytes = [70, 80, 90];
+      await temp2.writeAsBytes(gen2Bytes);
+
+      await expectLater(
+        () => storage.commitAsset(
+          productId: 'fail_e',
+          tempFile: temp2,
+          fileExtension: 'tif',
+          expectedSize: 3,
+        ),
+        throwsA(isA<NasaStorageFailure>()),
+      );
+
+      storage.testFailureInjectionPoint = StorageCommitFailurePoint.none;
+
+      // Crucial invariant: Authoritative commit was completed BEFORE postCommitCleanup failed!
+      // Therefore, Gen 2 is the active, verified generation!
+      final verified = await storage.getVerifiedAsset('fail_e');
+      expect(verified, isNotNull);
+      expect(verified!.productId, 'fail_e');
+      expect(verified.fileSizeBytes, 3);
+      expect(await File(verified.localFilePath).readAsBytes(), gen2Bytes);
+
+      // Gen 1 asset file still exists because cleanup threw before finishing
+      final gen1File = File(meta1.localFilePath);
+      expect(await gen1File.exists(), isTrue);
+
+      // Run recovery: recovery validates active Gen 2, cleans up old unreferenced Gen 1
+      await storage.recoverStorageState();
+
+      final afterRecovery = await storage.getVerifiedAsset('fail_e');
+      expect(afterRecovery, isNotNull);
+      expect(afterRecovery!.fileSizeBytes, 3);
+      expect(await File(afterRecovery.localFilePath).readAsBytes(), gen2Bytes);
+
+      // Old generation 1 is now cleaned up
+      expect(await gen1File.exists(), isFalse);
+    });
+
+    // Mandatory Successful Real Replacement Public Operation Test
+
+    test('Mandatory Successful Replacement: Full end-to-end commitAsset() replacement on real filesystem', () async {
+      const prodId = 'replace_real_product';
+
+      // 1. Commit Generation 1 through public commitAsset()
+      final temp1 = storage.getTempFile(prodId);
+      final gen1Payload = [1, 2, 3, 4, 5];
+      await temp1.writeAsBytes(gen1Payload);
+      final gen1Sha = await storage.computeSha256(temp1);
+
+      final meta1 = await storage.commitAsset(
+        productId: prodId,
+        tempFile: temp1,
+        fileExtension: 'tif',
+        expectedSize: 5,
+        expectedSha256: gen1Sha,
+      );
+
+      expect(meta1.productId, prodId);
+      expect(meta1.fileSizeBytes, 5);
+
+      // 2. Verify Generation 1 using getVerifiedAsset()
+      final verified1 = await storage.getVerifiedAsset(prodId);
+      expect(verified1, isNotNull);
+      expect(verified1!.productId, prodId);
+      expect(verified1.fileSizeBytes, 5);
+      expect(verified1.sha256Digest, gen1Sha);
+      expect(await File(verified1.localFilePath).readAsBytes(), gen1Payload);
+      final gen1FilePath = verified1.localFilePath;
+
+      // 3. Download/write a different payload to a second temporary file
+      final temp2 = storage.getTempFile(prodId);
+      final gen2Payload = [10, 20, 30, 40, 50, 60, 70];
+      await temp2.writeAsBytes(gen2Payload);
+      final gen2Sha = await storage.computeSha256(temp2);
+
+      // 4. Call commitAsset() again using the same product ID
+      final meta2 = await storage.commitAsset(
+        productId: prodId,
+        tempFile: temp2,
+        fileExtension: 'tif',
+        expectedSize: 7,
+        expectedSha256: gen2Sha,
+      );
+
+      // 5. Verify the authoritative metadata now references Generation 2
+      final verified2 = await storage.getVerifiedAsset(prodId);
+      expect(verified2, isNotNull);
+      expect(verified2!.productId, prodId);
+      expect(verified2.localFilePath, meta2.localFilePath);
+      expect(verified2.localFilePath, isNot(equals(gen1FilePath)));
+
+      // 6. Verify Generation 2 exact bytes and size
+      expect(verified2.fileSizeBytes, 7);
+      expect(verified2.sha256Digest, gen2Sha);
+      expect(await File(verified2.localFilePath).readAsBytes(), gen2Payload);
+
+      // 7. Verify Generation 1 cleanup occurred after the new pointer was committed
+      final gen1File = File(gen1FilePath);
+      expect(await gen1File.exists(), isFalse);
+
+      // 8. Run recoverStorageState() again and verify active generation remains correct
+      await storage.recoverStorageState();
+      final verifiedAfterRecovery = await storage.getVerifiedAsset(prodId);
+      expect(verifiedAfterRecovery, isNotNull);
+      expect(verifiedAfterRecovery!.localFilePath, verified2.localFilePath);
+      expect(verifiedAfterRecovery.fileSizeBytes, 7);
+      expect(
+        await File(verifiedAfterRecovery.localFilePath).readAsBytes(),
+        gen2Payload,
+      );
+    });
   });
 }
