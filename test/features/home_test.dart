@@ -10,18 +10,70 @@ import 'package:luna_sight/features/home/presentation/widgets/module_status_card
 
 void main() {
   group('Home Feature & Repository Tests', () {
-    test('LocalSystemModuleRepository returns non-empty roadmap modules with valid status', () {
+    test('LocalSystemModuleRepository returns exact 11 roadmap modules with valid sequence and status', () {
       const repository = LocalSystemModuleRepository();
       final modules = repository.getSystemModules();
 
-      expect(modules.isNotEmpty, isTrue);
-      // Phase 01 is operational
+      expect(modules.length, 11);
+
+      // Verify Phase 01 is operational
       final phase01 = modules.firstWhere((m) => m.id == 'flutter_foundation');
+      expect(phase01.title, 'Flutter Foundation');
+      expect(phase01.phase, 'Phase 01');
       expect(phase01.status, ModuleStatus.operational);
 
-      // Future scientific modules are planned
-      final phase02 = modules.firstWhere((m) => m.id == 'scientific_engine');
-      expect(phase02.status, ModuleStatus.planned);
+      // Verify all phases 02 through 11 are planned
+      final expectedSequence = [
+        (
+          'nasa_data_integration',
+          'NASA Data Integration',
+          'Phase 02 (Planned)',
+        ),
+        ('lunar_site_explorer', 'Lunar Site Explorer', 'Phase 03 (Planned)'),
+        (
+          'scientific_geometry_engine',
+          'Scientific Geometry Engine',
+          'Phase 04 (Planned)',
+        ),
+        (
+          'terrain_horizon_engine',
+          'Terrain Horizon Engine',
+          'Phase 05 (Planned)',
+        ),
+        (
+          'solar_illumination_analysis',
+          'Solar Illumination Analysis',
+          'Phase 06 (Planned)',
+        ),
+        (
+          'earth_visibility_analysis',
+          'Earth Visibility Analysis',
+          'Phase 07 (Planned)',
+        ),
+        ('mission_planning', 'Mission Planning', 'Phase 08 (Planned)'),
+        (
+          'site_comparison_scoring',
+          'Site Comparison & Scoring',
+          'Phase 09 (Planned)',
+        ),
+        (
+          'dashboard_visualization',
+          'Dashboard & Visualization',
+          'Phase 10 (Planned)',
+        ),
+        (
+          'integration_final_release',
+          'Integration & Final Release',
+          'Phase 11 (Planned)',
+        ),
+      ];
+
+      for (final (id, title, phase) in expectedSequence) {
+        final module = modules.firstWhere((m) => m.id == id);
+        expect(module.title, title);
+        expect(module.phase, phase);
+        expect(module.status, ModuleStatus.planned);
+      }
     });
 
     testWidgets('ModuleStatusCard renders operational status correctly', (
@@ -70,10 +122,13 @@ void main() {
     });
   });
 
-  group('Responsive Layout Tests across Form Factors', () {
-    Widget buildConstrainedApp(Size size) {
+  group('Comprehensive Responsive & Layout Boundary Tests', () {
+    Widget buildConstrainedApp(Size size, {double textScaleFactor = 1.0}) {
       return MediaQuery(
-        data: MediaQueryData(size: size),
+        data: MediaQueryData(
+          size: size,
+          textScaler: TextScaler.linear(textScaleFactor),
+        ),
         child: SizedBox(
           width: size.width,
           height: size.height,
@@ -96,6 +151,90 @@ void main() {
       expect(find.text(AppConstants.appName), findsWidgets);
       expect(tester.takeException(), isNull);
     });
+
+    testWidgets(
+      'Renders without overflow immediately below compact breakpoint (599x800)',
+      (tester) async {
+        tester.view.physicalSize = const Size(599, 800);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+
+        await tester.pumpWidget(buildConstrainedApp(const Size(599, 800)));
+        await tester.pumpAndSettle();
+
+        expect(find.text(AppConstants.appName), findsWidgets);
+        expect(tester.takeException(), isNull);
+      },
+    );
+
+    testWidgets(
+      'Renders without overflow immediately at compact/medium breakpoint boundary (600x800)',
+      (tester) async {
+        tester.view.physicalSize = const Size(600, 800);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+
+        await tester.pumpWidget(buildConstrainedApp(const Size(600, 800)));
+        await tester.pumpAndSettle();
+
+        expect(find.text(AppConstants.appName), findsWidgets);
+        expect(tester.takeException(), isNull);
+      },
+    );
+
+    testWidgets(
+      'Renders without overflow around medium breakpoint (839x1000 and 840x1000)',
+      (tester) async {
+        for (final width in [839.0, 840.0, 841.0]) {
+          tester.view.physicalSize = Size(width, 1000);
+          tester.view.devicePixelRatio = 1.0;
+
+          await tester.pumpWidget(buildConstrainedApp(Size(width, 1000)));
+          await tester.pumpAndSettle();
+
+          expect(find.text(AppConstants.appName), findsWidgets);
+          expect(tester.takeException(), isNull);
+        }
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      },
+    );
+
+    testWidgets(
+      'Renders without overflow on narrow landscape phone (640x360)',
+      (tester) async {
+        tester.view.physicalSize = const Size(640, 360);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+
+        await tester.pumpWidget(buildConstrainedApp(const Size(640, 360)));
+        await tester.pumpAndSettle();
+
+        expect(find.text(AppConstants.appName), findsWidgets);
+        expect(tester.takeException(), isNull);
+      },
+    );
+
+    testWidgets(
+      'Renders without overflow with enlarged accessibility text scale (1.5x) on 360x640',
+      (tester) async {
+        tester.view.physicalSize = const Size(360, 640);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+
+        await tester.pumpWidget(
+          buildConstrainedApp(const Size(360, 640), textScaleFactor: 1.5),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.text(AppConstants.appName), findsWidgets);
+        expect(tester.takeException(), isNull);
+      },
+    );
 
     testWidgets(
       'Renders without overflow on Standard Android Phone (390x844)',
@@ -154,8 +293,12 @@ void main() {
             builder: (context) {
               final deviceClass = ResponsiveLayout.getDeviceClass(context);
               final isCompact = ResponsiveLayout.isCompact(context);
+              final isMedium = ResponsiveLayout.isMedium(context);
+              final isExpanded = ResponsiveLayout.isExpanded(context);
               return Scaffold(
-                body: Text('Class: $deviceClass, Compact: $isCompact'),
+                body: Text(
+                  'Class: $deviceClass, Compact: $isCompact, Medium: $isMedium, Expanded: $isExpanded',
+                ),
               );
             },
           ),

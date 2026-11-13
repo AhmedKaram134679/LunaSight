@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:luna_sight/app/config/app_config.dart';
 import 'package:luna_sight/core/error/app_error_handler.dart';
 import 'package:luna_sight/core/error/failures.dart';
 import 'package:luna_sight/core/logging/app_logger.dart';
@@ -56,6 +57,22 @@ void main() {
       expect(testHandler.logs.length, 2);
       expect(testHandler.logs, contains('WARNING: Observed warning'));
       expect(testHandler.logs, contains('ERROR: Observed error'));
+    });
+
+    test('AppLogger.configure applies AppConfig settings accurately', () {
+      // Test development configuration (detailed logging enabled)
+      final devConfig = AppConfig.development();
+      AppLogger.configure(
+        enableDetailedLogging: devConfig.enableDetailedLogging,
+      );
+      expect(AppLogger.minLevel, LogLevel.debug);
+
+      // Test production configuration (detailed logging disabled)
+      final prodConfig = AppConfig.production();
+      AppLogger.configure(
+        enableDetailedLogging: prodConfig.enableDetailedLogging,
+      );
+      expect(AppLogger.minLevel, LogLevel.info);
     });
   });
 

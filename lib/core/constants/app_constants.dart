@@ -29,4 +29,3 @@ class AppConstants {
   static const double radiusLarge = 16.0;
   static const double radiusFull = 999.0;
 }
-

@@ -1,9 +1,12 @@
+import 'package:luna_sight/core/constants/app_constants.dart';
+
 /// System environment types.
 enum AppEnvironment { development, staging, production }
 
 /// Global runtime configuration for LunaSight.
 ///
 /// Keeps environment setup and build properties decoupled from UI presentation.
+/// References [AppConstants.appVersion] as the single centralized source of truth for versioning.
 class AppConfig {
   final AppEnvironment environment;
   final String appName;
@@ -21,8 +24,8 @@ class AppConfig {
   factory AppConfig.production() {
     return const AppConfig(
       environment: AppEnvironment.production,
-      appName: 'LunaSight',
-      version: '1.0.0',
+      appName: AppConstants.appName,
+      version: AppConstants.appVersion,
       enableDetailedLogging: false,
     );
   }
@@ -31,10 +34,9 @@ class AppConfig {
   factory AppConfig.development() {
     return const AppConfig(
       environment: AppEnvironment.development,
-      appName: 'LunaSight (Dev)',
-      version: '1.0.0',
+      appName: '${AppConstants.appName} (Dev)',
+      version: AppConstants.appVersion,
       enableDetailedLogging: true,
     );
   }
 }
-

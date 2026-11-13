@@ -4,4 +4,3 @@ import 'package:luna_sight/features/home/domain/models/system_module.dart';
 abstract class SystemModuleRepository {
   List<SystemModule> getSystemModules();
 }
-

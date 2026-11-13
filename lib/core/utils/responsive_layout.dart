@@ -31,4 +31,3 @@ class ResponsiveLayout {
   static bool isExpanded(BuildContext context) =>
       MediaQuery.sizeOf(context).width >= AppConstants.breakpointMedium;
 }
-

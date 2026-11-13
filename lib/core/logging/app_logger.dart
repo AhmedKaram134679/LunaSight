@@ -13,9 +13,14 @@ abstract class LogHandler {
   });
 }
 
-/// Default development and console logger utilizing [debugPrint].
+/// Default console log handler.
+///
+/// In debug mode or when verbose details are enabled, outputs diagnostic details.
+/// In release mode, guards against emitting raw stack traces or internal technical details.
 class ConsoleLogHandler implements LogHandler {
-  const ConsoleLogHandler();
+  final bool outputStackTraces;
+
+  const ConsoleLogHandler({this.outputStackTraces = kDebugMode});
 
   @override
   void handle(
@@ -36,7 +41,7 @@ class ConsoleLogHandler implements LogHandler {
     if (error != null) {
       debugPrint('$prefix Error: $error');
     }
-    if (stackTrace != null) {
+    if (stackTrace != null && outputStackTraces) {
       debugPrint('$prefix StackTrace:\n$stackTrace');
     }
   }
@@ -51,12 +56,25 @@ class AppLogger {
   static final List<LogHandler> _handlers = [const ConsoleLogHandler()];
   static LogLevel minLevel = kReleaseMode ? LogLevel.info : LogLevel.debug;
 
+  /// Configure the logger based on application settings.
+  static void configure({
+    required bool enableDetailedLogging,
+    LogLevel? minimumLevel,
+  }) {
+    minLevel =
+        minimumLevel ??
+        (enableDetailedLogging ? LogLevel.debug : LogLevel.info);
+
+    _handlers.clear();
+    _handlers.add(ConsoleLogHandler(outputStackTraces: enableDetailedLogging));
+  }
+
   /// Register an additional log handler (useful for testing or diagnostics).
   static void addHandler(LogHandler handler) {
     _handlers.add(handler);
   }
 
-  /// Reset handlers to default console logger.
+  /// Reset handlers to default console logger and standard level.
   static void resetHandlers() {
     _handlers.clear();
     _handlers.add(const ConsoleLogHandler());

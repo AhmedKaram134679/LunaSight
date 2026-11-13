@@ -17,4 +17,3 @@ class SystemModule {
     required this.status,
   });
 }
-

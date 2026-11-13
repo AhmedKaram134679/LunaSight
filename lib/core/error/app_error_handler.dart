@@ -18,8 +18,9 @@ class AppErrorHandler {
         error: details.exception,
         stackTrace: details.stack,
       );
+      // In debug mode, allow standard Flutter console diagnostics without duplicate logger entries
       if (kDebugMode) {
-        FlutterError.dumpErrorToConsole(details);
+        FlutterError.presentError(details);
       }
     };
 
@@ -30,7 +31,7 @@ class AppErrorHandler {
         error: error,
         stackTrace: stack,
       );
-      return true; // handled
+      return true; // handled, avoids unhandled crashing or duplicate console spew
     };
 
     // 3. User-facing fallback widget when a widget build fails catastrophically

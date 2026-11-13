@@ -45,4 +45,3 @@ class ScientificCard extends StatelessWidget {
     return cardContent;
   }
 }
-

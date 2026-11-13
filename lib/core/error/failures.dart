@@ -48,4 +48,3 @@ class NavigationFailure extends AppFailure {
     super.stackTrace,
   });
 }
-
