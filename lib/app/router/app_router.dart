@@ -1,0 +1,106 @@
+import 'package:flutter/material.dart';
+import 'package:luna_sight/core/constants/app_constants.dart';
+import 'package:luna_sight/core/error/failures.dart';
+import 'package:luna_sight/core/logging/app_logger.dart';
+import 'package:luna_sight/features/home/presentation/pages/home_page.dart';
+
+/// Centralized navigation and route generation for LunaSight.
+///
+/// Decouples UI screens from navigation mechanisms while gracefully handling
+/// undefined or invalid routes without runtime exceptions.
+class AppRouter {
+  AppRouter._();
+
+  static const String initialRoute = '/';
+  static const String homeRoute = '/';
+
+  /// Generates routes dynamically based on incoming [RouteSettings].
+  static Route<dynamic> onGenerateRoute(RouteSettings settings) {
+    AppLogger.debug('Navigating to route: ${settings.name}');
+
+    switch (settings.name) {
+      case homeRoute:
+        return MaterialPageRoute<void>(
+          builder: (_) => const HomePage(),
+          settings: settings,
+        );
+
+      default:
+        AppLogger.warning('Route not found: ${settings.name}');
+        return MaterialPageRoute<void>(
+          builder: (_) => RouteNotFoundPage(routeName: settings.name),
+          settings: settings,
+        );
+    }
+  }
+
+  /// Safe route builder for unknown or invalid routes.
+  static Route<dynamic> onUnknownRoute(RouteSettings settings) {
+    final failure = NavigationFailure(
+      message: 'Unknown navigation target: ${settings.name}',
+    );
+    AppLogger.error(failure.message);
+
+    return MaterialPageRoute<void>(
+      builder: (_) => RouteNotFoundPage(routeName: settings.name),
+      settings: settings,
+    );
+  }
+}
+
+/// Fallback presentation page when an unknown route is accessed.
+class RouteNotFoundPage extends StatelessWidget {
+  final String? routeName;
+
+  const RouteNotFoundPage({super.key, this.routeName});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Destination Not Found')),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(AppConstants.space24),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 480),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.explore_off_outlined,
+                  size: 56,
+                  color: theme.colorScheme.error,
+                ),
+                const SizedBox(height: AppConstants.space16),
+                Text(
+                  'Route Not Found',
+                  style: theme.textTheme.headlineMedium,
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: AppConstants.space8),
+                Text(
+                  'The requested navigation route "${routeName ?? 'unknown'}" does not exist.',
+                  style: theme.textTheme.bodyMedium,
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: AppConstants.space24),
+                OutlinedButton.icon(
+                  onPressed: () {
+                    Navigator.of(context).pushNamedAndRemoveUntil(
+                      AppRouter.homeRoute,
+                      (route) => false,
+                    );
+                  },
+                  icon: const Icon(Icons.home_outlined),
+                  label: const Text('Return to Home'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
