@@ -240,15 +240,17 @@ class _CustomSiteEntryPageState extends State<CustomSiteEntryPage> {
                       ),
                       decoration: const InputDecoration(
                         labelText: 'Surface Elevation / Altitude (meters)',
-                        hintText: 'Optional elevation relative to lunar radius',
+                        hintText: 'Optional elevation relative to lunar radius (1,737.4 km)',
+                        helperText: 'Reference: Mean lunar sphere datum (r = 1,737,400 m)',
                         prefixIcon: Icon(Icons.height),
                       ),
                       validator: (value) {
                         if (value == null || value.trim().isEmpty) return null;
-                        if (double.tryParse(value.trim()) == null) {
+                        final parsed = double.tryParse(value.trim());
+                        if (parsed == null) {
                           return 'Must be a valid decimal number';
                         }
-                        return null;
+                        return LunarCoordinates.validateAltitude(parsed);
                       },
                     ),
                     const SizedBox(height: AppConstants.space16),

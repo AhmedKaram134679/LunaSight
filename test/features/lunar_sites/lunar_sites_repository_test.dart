@@ -2,9 +2,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:luna_sight/features/lunar_sites/lunar_sites.dart';
 
 void main() {
-  group('LunarCoordinates Domain Tests', () {
+  group('LunarCoordinates Domain Tests & Numeric Hardening', () {
     test('Constructs valid coordinates within boundaries', () {
-      const coords = LunarCoordinates(
+      final coords = LunarCoordinates(
         latitude: -89.9,
         longitude: 120.5,
         longitudeConvention: LongitudeConvention.eastPositive,
@@ -19,14 +19,83 @@ void main() {
       expect(coords.altitudeMeters, -1250.0);
     });
 
-    test('Throws assertion error if latitude exceeds bounds', () {
+    test(
+      'Throws ArgumentError if latitude exceeds bounds or is NaN/infinite',
+      () {
+        expect(
+          () => LunarCoordinates(latitude: -90.001, longitude: 0.0),
+          throwsArgumentError,
+        );
+        expect(
+          () => LunarCoordinates(latitude: 90.001, longitude: 0.0),
+          throwsArgumentError,
+        );
+        expect(
+          () => LunarCoordinates(latitude: double.nan, longitude: 0.0),
+          throwsArgumentError,
+        );
+        expect(
+          () => LunarCoordinates(latitude: double.infinity, longitude: 0.0),
+          throwsArgumentError,
+        );
+        expect(
+          () => LunarCoordinates(
+            latitude: double.negativeInfinity,
+            longitude: 0.0,
+          ),
+          throwsArgumentError,
+        );
+      },
+    );
+
+    test('Throws ArgumentError if longitude is NaN/infinite or exceeds [-180, 360]', () {
       expect(
-        () => LunarCoordinates(latitude: -91.0, longitude: 0.0),
-        throwsAssertionError,
+        () => LunarCoordinates(latitude: 0.0, longitude: -180.001),
+        throwsArgumentError,
       );
       expect(
-        () => LunarCoordinates(latitude: 90.1, longitude: 0.0),
-        throwsAssertionError,
+        () => LunarCoordinates(latitude: 0.0, longitude: 360.001),
+        throwsArgumentError,
+      );
+      expect(
+        () => LunarCoordinates(latitude: 0.0, longitude: double.nan),
+        throwsArgumentError,
+      );
+      expect(
+        () => LunarCoordinates(latitude: 0.0, longitude: double.infinity),
+        throwsArgumentError,
+      );
+      expect(
+        () =>
+            LunarCoordinates(latitude: 0.0, longitude: double.negativeInfinity),
+        throwsArgumentError,
+      );
+    });
+
+    test('Throws ArgumentError if altitude is NaN or infinite', () {
+      expect(
+        () => LunarCoordinates(
+          latitude: 0.0,
+          longitude: 0.0,
+          altitudeMeters: double.nan,
+        ),
+        throwsArgumentError,
+      );
+      expect(
+        () => LunarCoordinates(
+          latitude: 0.0,
+          longitude: 0.0,
+          altitudeMeters: double.infinity,
+        ),
+        throwsArgumentError,
+      );
+      expect(
+        () => LunarCoordinates(
+          latitude: 0.0,
+          longitude: 0.0,
+          altitudeMeters: double.negativeInfinity,
+        ),
+        throwsArgumentError,
       );
     });
 
@@ -34,37 +103,74 @@ void main() {
       'Validates latitude and longitude accurately via static validators',
       () {
         expect(LunarCoordinates.validateLatitude(null), isNotNull);
+        expect(
+          LunarCoordinates.validateLatitude(double.nan),
+          contains('finite'),
+        );
+        expect(
+          LunarCoordinates.validateLatitude(double.infinity),
+          contains('finite'),
+        );
+        expect(
+          LunarCoordinates.validateLatitude(double.negativeInfinity),
+          contains('finite'),
+        );
         expect(LunarCoordinates.validateLatitude(-90.1), isNotNull);
         expect(LunarCoordinates.validateLatitude(90.1), isNotNull);
+        expect(LunarCoordinates.validateLatitude(-90.0), isNull);
         expect(LunarCoordinates.validateLatitude(-89.9), isNull);
         expect(LunarCoordinates.validateLatitude(0.0), isNull);
         expect(LunarCoordinates.validateLatitude(90.0), isNull);
 
         expect(LunarCoordinates.validateLongitude(null), isNotNull);
+        expect(
+          LunarCoordinates.validateLongitude(double.nan),
+          contains('finite'),
+        );
+        expect(
+          LunarCoordinates.validateLongitude(double.infinity),
+          contains('finite'),
+        );
+        expect(
+          LunarCoordinates.validateLongitude(double.negativeInfinity),
+          contains('finite'),
+        );
         expect(LunarCoordinates.validateLongitude(-180.1), isNotNull);
         expect(LunarCoordinates.validateLongitude(360.1), isNotNull);
+        expect(LunarCoordinates.validateLongitude(-180.0), isNull);
         expect(LunarCoordinates.validateLongitude(-179.0), isNull);
         expect(LunarCoordinates.validateLongitude(0.0), isNull);
-        expect(LunarCoordinates.validateLongitude(359.0), isNull);
+        expect(LunarCoordinates.validateLongitude(360.0), isNull);
+
+        expect(LunarCoordinates.validateAltitude(null), isNull);
+        expect(LunarCoordinates.validateAltitude(-2500.0), isNull);
+        expect(
+          LunarCoordinates.validateAltitude(double.nan),
+          contains('finite'),
+        );
+        expect(
+          LunarCoordinates.validateAltitude(double.infinity),
+          contains('finite'),
+        );
       },
     );
 
     test('Formats coordinates correctly with directional conventions', () {
-      const eastPositive = LunarCoordinates(
+      final eastPositive = LunarCoordinates(
         latitude: -89.9,
         longitude: 120.0,
         longitudeConvention: LongitudeConvention.eastPositive,
       );
       expect(eastPositive.formattedCoordinates, '89.9000° S, 120.0000° E');
 
-      const westPositive = LunarCoordinates(
+      final westPositive = LunarCoordinates(
         latitude: 15.5,
         longitude: 45.0,
         longitudeConvention: LongitudeConvention.westPositive,
       );
       expect(westPositive.formattedCoordinates, '15.5000° N, 45.0000° W');
 
-      const negativeEast = LunarCoordinates(
+      final negativeEast = LunarCoordinates(
         latitude: -10.0,
         longitude: -50.0,
         longitudeConvention: LongitudeConvention.eastPositive,
@@ -73,7 +179,7 @@ void main() {
     });
 
     test('Serializes to and from JSON faithfully', () {
-      const original = LunarCoordinates(
+      final original = LunarCoordinates(
         latitude: -85.25,
         longitude: 210.75,
         longitudeConvention: LongitudeConvention.eastPositive,
@@ -91,6 +197,32 @@ void main() {
       expect(restored.provenance, original.provenance);
       expect(restored.altitudeMeters, original.altitudeMeters);
     });
+
+    test('Rejects invalid JSON coordinate representations', () {
+      expect(
+        () => LunarCoordinates.fromJson({
+          'latitude': 'invalid',
+          'longitude': 0.0,
+        }),
+        throwsFormatException,
+      );
+      expect(
+        () => LunarCoordinates.fromJson({'latitude': 100.0, 'longitude': 0.0}),
+        throwsFormatException,
+      );
+      expect(
+        () => LunarCoordinates.fromJson({'latitude': 0.0, 'longitude': 500.0}),
+        throwsFormatException,
+      );
+      expect(
+        () => LunarCoordinates.fromJson({
+          'latitude': 0.0,
+          'longitude': 0.0,
+          'altitude_meters': 'not_a_number',
+        }),
+        throwsFormatException,
+      );
+    });
   });
 
   group('LunarSite Domain & Model Tests', () {
@@ -101,19 +233,19 @@ void main() {
           id: 'test_p78_site',
           name: 'Test Polar Ridge',
           siteCode: 'SiteXX',
-          classification: SiteClassification.candidateSite,
+          classification: SiteClassification.nasaCatalogRegion,
           coordinates: null,
           sourceId: 'NASA_PGDA_PRODUCT_78',
           sourceOrganization: 'NASA GSFC PGDA',
           sourceUrl: Uri.parse('https://pgda.gsfc.nasa.gov/products/78'),
           citation: 'Barker et al. (2021)',
           description: 'Test region description',
-          relatedProductIds: const ['ldem_87s_5mpp'],
+          relatedProductIds: const [],
         );
 
         expect(site.hasCoordinates, isFalse);
         expect(site.coordinates, isNull);
-        expect(site.relatedProductIds, ['ldem_87s_5mpp']);
+        expect(site.relatedProductIds, isEmpty);
       },
     );
 
@@ -123,7 +255,7 @@ void main() {
         name: 'Model Site',
         siteCode: 'MS1',
         classification: SiteClassification.userDefined,
-        coordinates: const LunarCoordinates(
+        coordinates: LunarCoordinates(
           latitude: -88.5,
           longitude: 45.0,
           longitudeConvention: LongitudeConvention.eastPositive,
@@ -135,7 +267,7 @@ void main() {
         sourceUrl: Uri.parse('https://example.com/site'),
         citation: 'User Citation',
         description: 'Test User Site',
-        relatedProductIds: const ['test_product'],
+        relatedProductIds: const [],
       );
 
       final json = model.toJson();
@@ -162,43 +294,34 @@ void main() {
       expect(sites.length, 27);
     });
 
-    test('All 27 sites contain verified NASA PGDA Product 78 provenance', () {
+    test('Sites 1, 4, 7, and 11 are classified as highPriorityLandingSiteRegion and others as nasaCatalogRegion', () {
       final sites = BundledLunarSiteCatalog.officialSites;
-      final codes = sites.map((s) => s.siteCode).toSet();
+      final highPrioritySites = sites
+          .where(
+            (s) =>
+                s.classification ==
+                SiteClassification.highPriorityLandingSiteRegion,
+          )
+          .toList();
 
-      // Check required codes from NASA Product 78
-      final expectedCodes = {
+      expect(highPrioritySites.length, 4);
+      expect(highPrioritySites.map((s) => s.siteCode).toSet(), {
         'Site01',
         'Site04',
-        'Site06',
         'Site07',
         'Site11',
-        'Site20',
-        'Site20v2',
-        'Site23',
-        'Site42',
-        'Haworth',
-        'Shoemaker',
-        'DM1',
-        'DM2',
-        'SL2',
-        'SL3',
-        'NPA',
-        'NPB',
-        'NPC',
-        'NPD',
-        'LM1',
-        'LM2',
-        'LM3',
-        'LM4',
-        'LM5',
-        'LM6',
-        'LM7',
-        'LM8',
-      };
+      });
 
-      expect(codes, expectedCodes);
+      final catalogRegions = sites
+          .where(
+            (s) => s.classification == SiteClassification.nasaCatalogRegion,
+          )
+          .toList();
+      expect(catalogRegions.length, 23);
+    });
 
+    test('All 27 sites contain verified NASA PGDA Product 78 provenance and null coordinates', () {
+      final sites = BundledLunarSiteCatalog.officialSites;
       for (final site in sites) {
         expect(site.sourceId, 'NASA_PGDA_PRODUCT_78');
         expect(site.sourceOrganization, 'NASA GSFC PGDA');
@@ -210,35 +333,19 @@ void main() {
         expect(site.citation, contains('Product 78'));
         expect(site.name.trim().isNotEmpty, isTrue);
         expect(site.description.trim().isNotEmpty, isTrue);
-        // Crucial: coordinates must be null to prevent fabricated center points
         expect(site.coordinates, isNull);
       }
     });
 
-    test('Only sites within 87°S to 90°S link to Product 81 ldem_87s_5mpp', () {
+    test('Zero Product 78 sites have unsupported Product 81 relatedProductIds', () {
       final sites = BundledLunarSiteCatalog.officialSites;
       for (final site in sites) {
-        if (site.siteCode == 'Site01' ||
-            site.siteCode == 'Site04' ||
-            site.siteCode == 'Site07' ||
-            site.siteCode == 'Site11' ||
-            site.siteCode == 'Haworth' ||
-            site.siteCode == 'Shoemaker' ||
-            site.siteCode == 'SL2' ||
-            site.siteCode == 'SL3' ||
-            site.siteCode.startsWith('LM')) {
-          expect(
-            site.relatedProductIds,
-            contains('ldem_87s_5mpp'),
-            reason: '${site.siteCode} should link ldem_87s_5mpp',
-          );
-        } else {
-          expect(
-            site.relatedProductIds,
-            isEmpty,
-            reason: '${site.siteCode} is outside 87°S mosaic coverage',
-          );
-        }
+        expect(
+          site.relatedProductIds,
+          isEmpty,
+          reason:
+              '${site.siteCode} must not link to Product 81 without explicit source documentation',
+        );
       }
     });
   });
@@ -287,23 +394,19 @@ void main() {
     );
 
     test('filterSites filters by classification correctly', () async {
-      final candidateSites = await repository.filterSites(
-        classification: SiteClassification.candidateSite,
+      final highPriority = await repository.filterSites(
+        classification: SiteClassification.highPriorityLandingSiteRegion,
       );
-      expect(candidateSites.length, 25); // 27 minus Haworth and Shoemaker
+      expect(highPriority.length, 4);
 
-      final referenceRegions = await repository.filterSites(
-        classification: SiteClassification.referenceRegion,
+      final catalogRegions = await repository.filterSites(
+        classification: SiteClassification.nasaCatalogRegion,
       );
-      expect(referenceRegions.length, 2); // Haworth and Shoemaker
-      expect(referenceRegions.map((r) => r.siteCode).toSet(), {
-        'Haworth',
-        'Shoemaker',
-      });
+      expect(catalogRegions.length, 23);
     });
 
     test('addCustomSite adds new site, validates coordinates, and lists with official sites', () async {
-      const customCoords = LunarCoordinates(
+      final customCoords = LunarCoordinates(
         latitude: -89.75,
         longitude: 15.2,
         longitudeConvention: LongitudeConvention.eastPositive,

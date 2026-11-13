@@ -3,11 +3,11 @@ import 'package:luna_sight/features/lunar_sites/domain/entities/lunar_coordinate
 
 /// Classification of a lunar geographical area or site.
 enum SiteClassification {
-  /// Reference geographical feature, basin, or crater region (e.g., Haworth, Shoemaker).
-  referenceRegion,
+  /// Regions explicitly identified in NASA documentation as surrounding high-priority landing sites (e.g., Sites 1, 4, 7, 11).
+  highPriorityLandingSiteRegion,
 
-  /// Evaluated candidate landing site from official exploration studies (e.g., Site01, LM1).
-  candidateSite,
+  /// General regional dataset or region of interest cataloged in NASA planetary geodesy archives (Product 78).
+  nasaCatalogRegion,
 
   /// Custom coordinate location or point of interest specified by the user.
   userDefined,

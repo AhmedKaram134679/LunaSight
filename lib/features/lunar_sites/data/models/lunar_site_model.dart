@@ -21,7 +21,7 @@ class LunarSiteModel extends LunarSite {
     final classifName = json['classification'] as String?;
     final classif = SiteClassification.values.firstWhere(
       (c) => c.name == classifName,
-      orElse: () => SiteClassification.referenceRegion,
+      orElse: () => SiteClassification.nasaCatalogRegion,
     );
 
     final rawCoordinates = json['coordinates'] as Map<String, dynamic>?;

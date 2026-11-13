@@ -73,6 +73,17 @@ class LocalLunarSiteRepository implements LunarSiteRepository {
     required LunarCoordinates coordinates,
     String? description,
   }) async {
+    final latErr = LunarCoordinates.validateLatitude(coordinates.latitude);
+    if (latErr != null) throw ArgumentError(latErr);
+
+    final lonErr = LunarCoordinates.validateLongitude(coordinates.longitude);
+    if (lonErr != null) throw ArgumentError(lonErr);
+
+    final altErr = LunarCoordinates.validateAltitude(
+      coordinates.altitudeMeters,
+    );
+    if (altErr != null) throw ArgumentError(altErr);
+
     final timestamp = DateTime.now().millisecondsSinceEpoch;
     final id = 'custom_site_$timestamp';
     final siteCode = 'USR-${_customSites.length + 1}';

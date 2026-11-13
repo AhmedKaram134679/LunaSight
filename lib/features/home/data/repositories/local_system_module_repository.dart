@@ -5,7 +5,9 @@ import 'package:luna_sight/features/home/domain/repositories/system_module_repos
 ///
 /// Reflects the agreed LunaSight 11-phase implementation sequence:
 /// Phase 01: Flutter Foundation (Operational)
-/// Phase 02 through Phase 11: Planned capabilities without fabricated results or NASA data.
+/// Phase 02: NASA Data Integration (Operational)
+/// Phase 03: Lunar Site Explorer (Operational)
+/// Phase 04 through Phase 11: Planned capabilities without fabricated results or NASA data.
 class LocalSystemModuleRepository implements SystemModuleRepository {
   const LocalSystemModuleRepository();
 
@@ -23,15 +25,15 @@ class LocalSystemModuleRepository implements SystemModuleRepository {
         id: 'nasa_data_integration',
         title: 'NASA Data Integration',
         description: 'Structured acquisition and caching of official lunar digital elevation, terrain, and planetary mission datasets.',
-        phase: 'Phase 02 (Planned)',
-        status: ModuleStatus.planned,
+        phase: 'Phase 02',
+        status: ModuleStatus.operational,
       ),
       SystemModule(
         id: 'lunar_site_explorer',
         title: 'Lunar Site Explorer',
         description: 'Interactive candidate site catalog, coordinates indexing, and geographic region classification.',
-        phase: 'Phase 03 (Planned)',
-        status: ModuleStatus.planned,
+        phase: 'Phase 03',
+        status: ModuleStatus.operational,
       ),
       SystemModule(
         id: 'scientific_geometry_engine',

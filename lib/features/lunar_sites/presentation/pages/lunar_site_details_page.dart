@@ -67,13 +67,13 @@ class _LunarSiteDetailsPageState extends State<LunarSiteDetailsPage> {
     final site = widget.site;
 
     final (badgeLabel, badgeColor, badgeIcon) = switch (site.classification) {
-      SiteClassification.candidateSite => (
-        'CANDIDATE SITE',
+      SiteClassification.highPriorityLandingSiteRegion => (
+        'HIGH PRIORITY LANDING REGION',
         AppColors.statusInfo,
         Icons.flag_outlined,
       ),
-      SiteClassification.referenceRegion => (
-        'REFERENCE REGION',
+      SiteClassification.nasaCatalogRegion => (
+        'NASA CATALOG REGION',
         AppColors.darkSecondary,
         Icons.terrain_outlined,
       ),
@@ -237,7 +237,7 @@ class _LunarSiteDetailsPageState extends State<LunarSiteDetailsPage> {
                 ),
                 const SizedBox(height: AppConstants.space16),
 
-                // Linked NASA Datasets Card
+                // Associated NASA Datasets Card
                 ScientificCard(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -261,15 +261,28 @@ class _LunarSiteDetailsPageState extends State<LunarSiteDetailsPage> {
                       ),
                       const SizedBox(height: AppConstants.space8),
                       if (site.relatedProductIds.isEmpty)
-                        Text(
-                          'No direct regional DEM products linked in current baseline.',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
-                          ),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'No specific NASA DEM products are explicitly documented as associated with this site in official source metadata.',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                            const SizedBox(height: AppConstants.space8),
+                            Text(
+                              'General NASA products (e.g. South Pole LOLA DEM Mosaic ldem_87s_5mpp) remain available independently through the application data catalog, but are not asserted as site-specific without authoritative documentation.',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant,
+                                fontStyle: FontStyle.italic,
+                              ),
+                            ),
+                          ],
                         )
                       else ...[
                         Text(
-                          'Regional LOLA products cataloged for this area in NASA GSFC archives:',
+                          'Directly documented site-associated NASA planetary datasets:',
                           style: theme.textTheme.bodySmall?.copyWith(
                             color: theme.colorScheme.onSurfaceVariant,
                           ),

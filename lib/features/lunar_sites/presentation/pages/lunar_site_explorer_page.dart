@@ -202,15 +202,17 @@ class _LunarSiteExplorerPageState extends State<LunarSiteExplorerPage> {
                             ),
                             const SizedBox(width: AppConstants.space8),
                             FilterChip(
-                              key: const Key('filter_candidate_sites'),
-                              label: const Text('Candidate Sites'),
+                              key: const Key('filter_landing_regions'),
+                              label: const Text('Landing Site Regions'),
                               selected:
                                   _selectedClassification ==
-                                  SiteClassification.candidateSite,
+                                  SiteClassification
+                                      .highPriorityLandingSiteRegion,
                               onSelected: (val) {
                                 setState(() {
                                   _selectedClassification = val
-                                      ? SiteClassification.candidateSite
+                                      ? SiteClassification
+                                            .highPriorityLandingSiteRegion
                                       : null;
                                 });
                                 _applyFilters();
@@ -218,15 +220,15 @@ class _LunarSiteExplorerPageState extends State<LunarSiteExplorerPage> {
                             ),
                             const SizedBox(width: AppConstants.space8),
                             FilterChip(
-                              key: const Key('filter_reference_regions'),
-                              label: const Text('Reference Regions'),
+                              key: const Key('filter_catalog_regions'),
+                              label: const Text('NASA Catalog Regions'),
                               selected:
                                   _selectedClassification ==
-                                  SiteClassification.referenceRegion,
+                                  SiteClassification.nasaCatalogRegion,
                               onSelected: (val) {
                                 setState(() {
                                   _selectedClassification = val
-                                      ? SiteClassification.referenceRegion
+                                      ? SiteClassification.nasaCatalogRegion
                                       : null;
                                 });
                                 _applyFilters();

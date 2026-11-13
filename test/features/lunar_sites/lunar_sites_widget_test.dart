@@ -5,13 +5,11 @@ import 'package:luna_sight/features/lunar_sites/lunar_sites.dart';
 import 'package:luna_sight/features/nasa_data/nasa_data.dart';
 
 class _MockNasaDataRepository implements NasaDataRepository {
-  final Map<String, bool> localAssets;
-
-  _MockNasaDataRepository({this.localAssets = const {}});
+  _MockNasaDataRepository();
 
   @override
   Future<bool> isAssetLocallyAvailable(String productId) async {
-    return localAssets[productId] ?? false;
+    return false;
   }
 
   @override
@@ -59,8 +57,15 @@ void main() {
     });
 
     testWidgets(
-      'LunarSiteExplorerPage renders official sites list and search filters',
+      'LunarSiteExplorerPage renders official sites list and classification filters',
       (tester) async {
+        tester.view.physicalSize = const Size(1000, 1400);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(() {
+          tester.view.resetPhysicalSize();
+          tester.view.resetDevicePixelRatio();
+        });
+
         await tester.pumpWidget(
           buildTestableWidget(LunarSiteExplorerPage(repository: repository)),
         );
@@ -81,14 +86,19 @@ void main() {
 
         // Filter chips
         expect(find.byKey(const Key('filter_all')), findsOneWidget);
-        expect(find.byKey(const Key('filter_candidate_sites')), findsOneWidget);
-        expect(
-          find.byKey(const Key('filter_reference_regions')),
-          findsOneWidget,
-        );
+        expect(find.byKey(const Key('filter_landing_regions')), findsOneWidget);
+        expect(find.byKey(const Key('filter_catalog_regions')), findsOneWidget);
 
-        // Filter by Reference Regions
-        await tester.tap(find.byKey(const Key('filter_reference_regions')));
+        // Filter by Landing Site Regions
+        await tester.tap(find.byKey(const Key('filter_landing_regions')));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Connecting Ridge'), findsOneWidget);
+        expect(find.text('Shackleton Rim'), findsOneWidget);
+        expect(find.text('Haworth Crater Region'), findsNothing);
+
+        // Filter by NASA Catalog Regions
+        await tester.tap(find.byKey(const Key('filter_catalog_regions')));
         await tester.pumpAndSettle();
 
         expect(find.text('Haworth Crater Region'), findsOneWidget);
@@ -108,7 +118,7 @@ void main() {
     );
 
     testWidgets(
-      'LunarSiteDetailsPage displays provenance and coordinate warning for Product 78 site',
+      'LunarSiteDetailsPage displays provenance, coordinate warning, and unlinked Product 81 disclaimer',
       (tester) async {
         tester.view.physicalSize = const Size(1000, 1400);
         tester.view.devicePixelRatio = 1.0;
@@ -118,9 +128,7 @@ void main() {
         });
 
         final site = (await repository.getSiteById('nasa_p78_site01'))!;
-        final mockNasaRepo = _MockNasaDataRepository(
-          localAssets: {'ldem_87s_5mpp': true},
-        );
+        final mockNasaRepo = _MockNasaDataRepository();
 
         await tester.pumpWidget(
           buildTestableWidget(
@@ -137,12 +145,17 @@ void main() {
           findsOneWidget,
         );
         expect(find.text('NASA_PGDA_PRODUCT_78'), findsOneWidget);
-        expect(find.text('LOCAL ASSET READY'), findsOneWidget);
+        expect(
+          find.textContaining(
+            'No specific NASA DEM products are explicitly documented',
+          ),
+          findsOneWidget,
+        );
       },
     );
 
     testWidgets(
-      'CustomSiteEntryPage validates coordinates and creates custom site',
+      'CustomSiteEntryPage validates coordinates, altitude, and creates custom site',
       (tester) async {
         tester.view.physicalSize = const Size(1000, 1200);
         tester.view.devicePixelRatio = 1.0;
@@ -198,6 +211,10 @@ void main() {
           find.byKey(const Key('custom_site_latitude_field')),
           '-89.8500',
         );
+        await tester.enterText(
+          find.byKey(const Key('custom_site_altitude_field')),
+          '-120.5',
+        );
         await tester.pumpAndSettle();
 
         await tester.ensureVisible(
@@ -214,6 +231,7 @@ void main() {
         );
         expect(customSite.coordinates!.latitude, -89.8500);
         expect(customSite.coordinates!.longitude, 45.0);
+        expect(customSite.coordinates!.altitudeMeters, -120.5);
         expect(
           customSite.coordinates!.provenance,
           CoordinateProvenance.userEntered,

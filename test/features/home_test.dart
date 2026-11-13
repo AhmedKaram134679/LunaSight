@@ -22,14 +22,22 @@ void main() {
       expect(phase01.phase, 'Phase 01');
       expect(phase01.status, ModuleStatus.operational);
 
-      // Verify all phases 02 through 11 are planned
+      // Verify Phase 02 is operational
+      final phase02 = modules.firstWhere(
+        (m) => m.id == 'nasa_data_integration',
+      );
+      expect(phase02.title, 'NASA Data Integration');
+      expect(phase02.phase, 'Phase 02');
+      expect(phase02.status, ModuleStatus.operational);
+
+      // Verify Phase 03 is operational
+      final phase03 = modules.firstWhere((m) => m.id == 'lunar_site_explorer');
+      expect(phase03.title, 'Lunar Site Explorer');
+      expect(phase03.phase, 'Phase 03');
+      expect(phase03.status, ModuleStatus.operational);
+
+      // Verify all phases 04 through 11 are planned
       final expectedSequence = [
-        (
-          'nasa_data_integration',
-          'NASA Data Integration',
-          'Phase 02 (Planned)',
-        ),
-        ('lunar_site_explorer', 'Lunar Site Explorer', 'Phase 03 (Planned)'),
         (
           'scientific_geometry_engine',
           'Scientific Geometry Engine',

@@ -17,13 +17,13 @@ class LunarSiteCard extends StatelessWidget {
     final theme = Theme.of(context);
 
     final (badgeLabel, badgeColor, badgeIcon) = switch (site.classification) {
-      SiteClassification.candidateSite => (
-        'CANDIDATE SITE',
+      SiteClassification.highPriorityLandingSiteRegion => (
+        'HIGH PRIORITY LANDING REGION',
         AppColors.statusInfo,
         Icons.flag_outlined,
       ),
-      SiteClassification.referenceRegion => (
-        'REFERENCE REGION',
+      SiteClassification.nasaCatalogRegion => (
+        'NASA CATALOG REGION',
         AppColors.darkSecondary,
         Icons.terrain_outlined,
       ),
