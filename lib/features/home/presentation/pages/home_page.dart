@@ -166,10 +166,7 @@ class _HomePageState extends State<HomePage> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                'LunaSight Core v${AppConstants.appVersion}',
-                style: theme.textTheme.titleMedium,
-              ),
+              Text('LunaSight Core', style: theme.textTheme.titleMedium),
               const SizedBox(height: AppConstants.space8),
               Text(
                 'Phase 01 establishes production-oriented foundations: offline resilience, clean architecture, unified theming, and responsive UI scaling. Scientific algorithms and lunar ephemeris engines are planned for Phase 02+.',

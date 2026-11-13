@@ -18,14 +18,12 @@ void main() {
           : AppConfig.development();
 
       // Apply logger configuration from AppConfig
-      AppLogger.configure(
-        enableDetailedLogging: config.enableDetailedLogging,
-      );
+      AppLogger.configure(enableDetailedLogging: config.enableDetailedLogging);
 
       // Initialize global error-handling hooks
       AppErrorHandler.initialize();
 
-      AppLogger.info('Starting ${config.appName} (v${config.version})...');
+      AppLogger.info('Starting ${config.appName}...');
 
       runApp(LunaSightApp(config: config));
     },

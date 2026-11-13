@@ -4,7 +4,6 @@ class AppConstants {
 
   static const String appName = 'LunaSight';
   static const String appTagline = 'Lunar Landing Site Analysis Platform';
-  static const String appVersion = '1.0.0';
 
   // Responsive Breakpoints (Logical Pixels)
   static const double breakpointCompact = 600.0;

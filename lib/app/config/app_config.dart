@@ -6,17 +6,14 @@ enum AppEnvironment { development, staging, production }
 /// Global runtime configuration for LunaSight.
 ///
 /// Keeps environment setup and build properties decoupled from UI presentation.
-/// References [AppConstants.appVersion] as the single centralized source of truth for versioning.
 class AppConfig {
   final AppEnvironment environment;
   final String appName;
-  final String version;
   final bool enableDetailedLogging;
 
   const AppConfig({
     required this.environment,
     required this.appName,
-    required this.version,
     required this.enableDetailedLogging,
   });
 
@@ -25,7 +22,6 @@ class AppConfig {
     return const AppConfig(
       environment: AppEnvironment.production,
       appName: AppConstants.appName,
-      version: AppConstants.appVersion,
       enableDetailedLogging: false,
     );
   }
@@ -35,7 +31,6 @@ class AppConfig {
     return const AppConfig(
       environment: AppEnvironment.development,
       appName: '${AppConstants.appName} (Dev)',
-      version: AppConstants.appVersion,
       enableDetailedLogging: true,
     );
   }
