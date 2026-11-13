@@ -146,11 +146,15 @@ A reference frame is not defined by a simple name string alone. To prevent physi
    - Dynamically offset from `MOON_ME` by small, ephemeris-dependent orientation angles.
 3. **Ephemeris-Dependent Frame Realizations (`DE421` vs `DE440`):**
    - The Moon's physical orientation depends on the planetary ephemeris integration and physical libration parameters fitted to LLR data.
-   - In NAIF SPICE specifications (`moon_de440_220930.tf` and predecessor kernel `moon_080317.tf`):
-     - For `DE421`, the orientation frame is designated `MOON_ME_DE421` (NAIF ID `31006`), historically aliased as generic `MOON_ME`.
-     - For `DE440`, NAIF defines the principal axes frame `MOON_PA_DE440` (NAIF ID `31008`) and the Mean Earth frame `MOON_ME_DE440_ME421` (NAIF ID `31007`).
-     - Crucially, `MOON_ME_DE440_ME421` was explicitly constructed by NAIF using constant rotational offsets relative to `MOON_PA_DE440` to closely align the DE440 Mean Earth frame with the predecessor `MOON_ME_DE421` frame.
-     - Generic aliases such as `MOON_ME` may be re-associated across kernel versions.
+   - In NAIF SPICE kernel `moon_080317.tf` (released March 17, 2008 for DE421):
+     - `MOON_PA_DE421`: NAIF ID `31006` (Principal Axes frame for DE421).
+     - `MOON_ME_DE421`: NAIF ID `31007` (Mean Earth / Polar Axis frame for DE421).
+   - In NAIF SPICE kernel `moon_de440_220930.tf` (released September 30, 2022 for DE440):
+     - `MOON_PA_DE440`: NAIF ID `31008` (Principal Axes frame for DE440).
+     - `MOON_ME_DE440_ME421`: NAIF ID `31009` (Mean Earth frame aligned with DE421 Mean Earth).
+     - `MOON_PA`: NAIF ID `31010` (Generic alias frame pointing to `MOON_PA_DE440`).
+     - `MOON_ME`: NAIF ID `31011` (Generic alias frame pointing to `MOON_ME_DE440_ME421`).
+   - Crucially, `MOON_ME_DE440_ME421` (31009) was explicitly constructed by NAIF using constant rotational offsets relative to `MOON_PA_DE440` (31008) to align the DE440 Mean Earth frame with the predecessor `MOON_ME_DE421` frame (31007).
    - *Status:* **UNRESOLVED** (The precise rotational transformation between `MOON_ME_DE440_ME421`, `MOON_ME_DE421`, and LOLA DEM coordinates must be verified before runtime integration in Phase 04B).
 
 ### 6.3 Frame Transformation Requirements
@@ -230,7 +234,7 @@ The query parameter mapping is governed strictly by the official API specificati
 | `EPHEM_TYPE` | All | Ephemeris mode | `'OBSERVER'`, `'VECTORS'`, `'ELEMENTS'`, `'SPK'` | `'VECTORS'` for Cartesian states; `'OBSERVER'` for topocentric AZ/EL |
 | `CENTER` | All | Origin / Observer location | Body ID (e.g. `'@301'` for Moon center, `'500@399'` for geocenter) or `'coord@301'` for custom topocentric surface site | Explicit center identifier |
 | `COORD_TYPE` | `coord@...` | Coordinate type for site | `'GEODETIC'` or `'CYLINDRICAL'` | Required when `CENTER='coord@...'` |
-| `SITE_COORD` | `coord@...` | Surface site coordinates | Comma-separated string `'<lon>,<lat>,<alt>'` | Longitude (° East), Latitude (°), Altitude ($\text{km}$) relative to reference ellipsoid |
+| `SITE_COORD` | `coord@...` | Surface site coordinates | Comma-separated string `'<lon>,<lat>,<alt>'` | Longitude (° East), Latitude (°), Altitude ($\text{km}$) relative to Horizons reference surface |
 | `REF_SYSTEM` | `OBSERVER`, `VECTORS` | Celestial frame orientation | `'ICRF'` (default) or `'B1950'` | Always `'ICRF'`. Defines celestial frame orientation; does not define topocentric AZ/EL axes. *Note: `MOON_ME` is NOT a valid `REF_SYSTEM` parameter.* |
 | `REF_PLANE` | `VECTORS`, `ELEMENTS` | Reference plane for vectors | `'FRAME'`, `'ECLIPTIC'`, or `'BODY EQUATOR'` | `'FRAME'` for ICRF-aligned; `'BODY EQUATOR'` for body equator and equinox. *Note: Does not apply to `OBSERVER`.* |
 | `VEC_CORR` | `VECTORS` | Vector correction level | `'NONE'` (geometric), `'LT'` (light-time), `'LT+S'` (light-time + aberration) | Explicitly captured per vector request. *Note: Does not apply to `OBSERVER`.* |
@@ -244,14 +248,19 @@ The query parameter mapping is governed strictly by the official API specificati
 When querying topocentric quantities from a lunar landing site:
 1. `CENTER` must be set to `'coord@301'`.
 2. `COORD_TYPE` must be specified as `'GEODETIC'` (or `'CYLINDRICAL'`).
-3. In Horizons, lunar GEODETIC coordinates use the Moon's Mean Earth reference model associated with DE421.
+3. In Horizons, lunar GEODETIC coordinates are defined relative to the Moon's Mean Earth reference system associated with DE421.
 4. `SITE_COORD` must provide three comma-separated numeric values:
    $$\text{SITE\_COORD} = '\lambda, \phi, h_{\text{km}}'$$
    - $\lambda$: Planetodetic / geodetic East Longitude in degrees ($0° \le \lambda \le 360°$ or $-180° \le \lambda \le +180°$).
    - $\phi$: Planetodetic / geodetic Latitude in degrees ($[-90°, +90°]$).
-   - $h_{\text{km}}$: Geodetic altitude in **kilometers** above the applicable lunar reference ellipsoid (not an arbitrary spherical datum).
-5. *Datum and Elevation Invariant:* LunaSight's LOLA DEM elevation is referenced to a spherical datum with constant radius $R_L = 1,737,400\text{ m}$. In contrast, Horizons' geodetic coordinates reference a triaxial/biaxial reference ellipsoid. Direct passing of spherical DEM elevation as ellipsoidal geodetic altitude without transformation is mathematically unvalidated.
-   - *Status:* **UNRESOLVED** (The exact conversion model mapping LunaSight spherical elevation $h_{\text{DEM}}$ to Horizons geodetic altitude $h_{\text{geodetic}}$ must be specified before automated `coord@301` queries are enabled in runtime).
+   - $h_{\text{km}}$: Geodetic altitude in **kilometers** above Horizons' lunar reference surface.
+5. *Distinction of Datums, Shapes, and Frames:*
+   The architecture distinguishes four separate geometric concepts that must not be conflated:
+   - **Moon Body Shape:** The actual physical topographic figure of the Moon, characterized by mean radius ($1,737.4 \pm 0.1\text{ km}$), equatorial bulge, and local topography.
+   - **Orientation Frame:** The Mean Earth / Polar Axis frame associated with DE421 (`MOON_ME_DE421`), which defines the orientation of the rotational and sub-Earth axes.
+   - **Horizons Geodetic Reference Surface:** Horizons documentation describes planetary reference ellipsoids generally as oblate spheroids with a single flatness coefficient ($r_x = r_y$) or triaxial shapes. While standard SPICE PCK kernels (`pck00010.tpc`) specify identical lunar radii ($1,737.4\text{ km}, 1,737.4\text{ km}, 1,737.4\text{ km}$), yielding a sphere, the internal datum definition and mathematical surface shape utilized by the Horizons server for lunar `coord@301` are not fully disclosed in public API docs.
+   - **LOLA DEM Vertical Datum:** The LOLA DEM (`ldem_87s_5mpp`) elevation is strictly referenced to a defined spherical datum with constant radius $R_L = 1,737,400.0\text{ m}$.
+   - *Status:* **UNRESOLVED** (The exact mathematical reference surface of Horizons and the precise relationship between LOLA DEM elevation and Horizons geodetic altitude cannot be assumed identical merely because both cite $1,737.4\text{ km}$, nor can an unverified ellipsoidal transformation be assumed. Automated topocentric `coord@301` queries in runtime remain unresolved pending empirical validation).
 
 *Status: **VERIFIED** (NASA JPL Horizons API Documentation & User Manual).*
 
@@ -278,10 +287,15 @@ Selenographic coordinates $(\phi, \lambda)$ represent:
    - Positive $h$: Surface above $1,737.4\text{ km}$ sphere.
    - Negative $h$: Surface below $1,737.4\text{ km}$ sphere.
 3. **Cartesian Selenocentric Position Vector ($\vec{P}_{\text{site}}$ in `MOON_ME`):**
-   Under a spherical datum approximation where $\phi$ is interpreted as geocentric/selenocentric latitude:
+   Under a spherical datum approximation where $\phi$ represents geocentric/selenocentric latitude:
    $$\vec{P}_{\text{site}} = (R_L + h) \begin{pmatrix} \cos\phi \cos\lambda \\ \cos\phi \sin\lambda \\ \sin\phi \end{pmatrix}$$
-   *Important Distinction:* Geodetic (planetodetic) latitude $\phi_{\text{geodetic}}$ is not identical to geocentric (selenocentric) latitude $\phi_{\text{geocentric}}$. For a non-spherical reference ellipsoid with flattening $f$, the relationship is $\tan\phi_{\text{geocentric}} = (1 - f)^2 \tan\phi_{\text{geodetic}}$. The above Cartesian equation represents a spherical approximation.
-   - *Status:* **UNRESOLVED** (Rigorous conversion from lunar geodetic reference ellipsoid parameters to Cartesian coordinates must be formally specified when non-spherical reference bodies are evaluated).
+   *Important Distinction:*
+   - In a spherical reference model where flattening $f = 0$, geodetic latitude $\phi_{\text{geodetic}}$ is mathematically identical to geocentric latitude $\phi_{\text{geocentric}}$.
+   - For an **oblate biaxial spheroid** with non-zero flattening $f = \frac{a - b}{a}$, the relationship is:
+     $$\tan\phi_{\text{geocentric}} = (1 - f)^2 \tan\phi_{\text{geodetic}}$$
+     This relationship is strictly restricted to biaxial oblate spheroids and does **not** apply to a triaxial ellipsoid or arbitrary reference shape.
+   - For a **triaxial ellipsoid** (with semi-axes $a > b > c$), the normal vector is non-coplanar with the $Z$-axis away from principal meridians, and latitude relationships depend on longitude. No simplified 2D relation applies.
+   - *Status:* **UNRESOLVED** (Rigorous conversion between geodetic coordinates and Cartesian coordinates depends on the definitive reference surface model and remains unresolved for non-spherical datums; the spherical equation above is retained strictly as an approximation).
 
 *Status: **VERIFIED** (NASA PGDA Product 81 & USGS PSDI Lunar Standards).*
 
@@ -293,13 +307,13 @@ At any lunar landing site with coordinates $(\phi, \lambda)$, a local orthonorma
 
 ### 11.1 Basis Vector Definitions
 1. **Up Vector ($\hat{U}$):**
-   Spherical radial unit vector pointing outward along the radius vector from the lunar center of mass toward local zenith:
+   Spherical radial unit vector pointing outward along the radius vector from the lunar center of mass toward local zenith, where $\phi$ represents geocentric latitude:
    $$\hat{U} = \begin{pmatrix} \cos\phi \cos\lambda \\ \cos\phi \sin\lambda \\ \sin\phi \end{pmatrix}$$
    *Distinction among Up Vector Concepts:*
-   - **Spherical Radial Up:** Points directly away from the center of mass along the radial vector.
-   - **Ellipsoidal Geodetic Up:** Normal to the reference ellipsoid surface; deviates from radial Up by the deflection of the normal (negligible for near-spherical bodies but mathematically distinct).
-   - **Terrain Surface Normal:** Normal to the local topographic slope computed from adjacent DEM elevation cells; represents actual physical ground orientation (deferred to Phase 05 slope/illumination analysis).
-   - *Status:* **UNRESOLVED** (Selection of the topocentric reference plane—spherical radial vs ellipsoidal geodetic—for topocentric coordinate representation must be formally benchmarked in Phase 04B).
+   - **Spherical Radial Up:** Points directly away from the center of mass along the radius vector; parameterized by geocentric latitude $\phi$ and longitude $\lambda$.
+   - **Ellipsoidal Geodetic Up:** Surface normal unit vector to the actual reference ellipsoid at geodetic coordinates $(\phi_{\text{geodetic}}, \lambda)$. Deviates from radial Up by the deflection of the normal.
+   - **Terrain Surface Normal:** Normal unit vector to the local topographic slope derived from adjacent DEM elevation cells; represents actual physical ground orientation (deferred to Phase 05 slope/illumination analysis).
+   - *Status:* **UNRESOLVED** (The topocentric reference model—spherical radial vs ellipsoidal geodetic—is not silently selected; runtime selection remains unresolved pending empirical verification of the upstream Horizons reference surface).
 2. **East Vector ($\hat{E}$):**
    Unit vector pointing in the direction of increasing East longitude:
    $$\hat{E} = \begin{pmatrix} -\sin\lambda \\ \cos\lambda \\ 0 \end{pmatrix}$$
@@ -311,7 +325,7 @@ At any lunar landing site with coordinates $(\phi, \lambda)$, a local orthonorma
 At the exact rotational South Pole ($\phi = -90.0°$):
 - $\cos\phi = 0$, $\sin\phi = -1$.
 - $\hat{U} = (0, 0, -1)^T$.
-- Meridians converge: Longitude $\lambda$ is geometrically undefined.
+- Meridians converge: Longitude $\lambda$ is geometrically undefined (meridian ambiguity).
 - **Contract Requirement:** The engine must enforce an explicit singularity check when $|\phi|$ approaches $90.0°$. The exact numerical angular threshold $\epsilon_{\text{pole}}$ and meridian tie convention are classified as **PROPOSED** until verified with numerical test cases.
 
 *Status: **VERIFIED** (Standard geodesy).*
@@ -332,17 +346,65 @@ Scientific calculations must never fail silently or produce undefined floating-p
      $$\text{clamped} = \max(-1.0, \min(1.0, \hat{a} \cdot \hat{b}))$$
 
 ### 12.2 Numerical Thresholds Status & Verification Evidence
-Previous draft listed arbitrary thresholds without documented derivations. All numerical threshold values are categorized below with their required verification evidence and physical basis:
+Previous drafts listed numerical thresholds without complete derivations. The physical, scale-dependent, and numerical precision bases for each threshold are detailed below:
 
-| Threshold / Parameter | Proposed Value | Category | Verification Requirement & Physical / Scale Basis |
+#### 1. Zero-Vector Norm Threshold ($\epsilon_{\text{zero}}$) — `UNRESOLVED` (Illustrative: $1.0 \times 10^{-12}\text{ m}$)
+- **Distinction between Normal/Subnormal Range vs Coordinate Resolution:**
+  IEEE-754 double precision (binary64) defines:
+  - Minimum positive normal value: $\sim 2.23 \times 10^{-308}$
+  - Minimum positive subnormal value: $\sim 4.94 \times 10^{-324}$
+  However, avoiding floating-point underflow does **not** guarantee numerical coordinate resolution.
+- **Coordinate Spacing at Lunar Scale vs Local Displacements:**
+  - For selenocentric coordinates ($\|\vec{r}\| \sim 1.74 \times 10^6\text{ m}$), unit in the last place ($\text{ULP}$) is:
+    $$\text{ULP}(1.74 \times 10^6\text{ m}) = 2^{-52} \times 2^{\lfloor \log_2(1.74 \times 10^6) \rfloor} \approx 4.66 \times 10^{-10}\text{ m}$$
+  - A difference vector obtained by subtracting two large selenocentric coordinates cannot resolve physical differences below $\sim 4.7 \times 10^{-10}\text{ m}$.
+  - Conversely, for local topocentric displacement vectors formulated directly in the observer frame, coordinate values are much smaller, allowing finer resolution.
+  - Therefore, a single absolute threshold like $1.0 \times 10^{-12}\text{ m}$ cannot serve as a universal normalization threshold for both large-scale coordinate differences and local displacements.
+  - *Status:* **UNRESOLVED** (A dual or relative threshold strategy—e.g. scale-relative $\epsilon_{\text{rel}} \cdot \|\vec{r}\|$ for large vectors and absolute $\epsilon_{\text{abs}}$ for local vectors—must be derived in Phase 04B).
+
+#### 2. Polar Singularity Angle Threshold ($\epsilon_{\text{pole}}$) — `PROPOSED` ($1.0 \times 10^{-7}\text{ rad}$)
+- **Dimensional Scale:** At the lunar radius $R_L \approx 1,737.4\text{ km}$, an angular offset of $1.0 \times 10^{-7}\text{ rad}$ corresponds to a surface displacement:
+  $$\Delta s = R_L \cdot \epsilon_{\text{pole}} \approx 1.7374 \times 10^6\text{ m} \times 1.0 \times 10^{-7} \approx 0.174\text{ m}$$
+- **Numerical Validation Requirement:** Physical displacement alone does not prove numerical stability. Stability tests must demonstrate that trigonometric projections ($\cos\phi$, $\sin\phi$) and basis vector cross products maintain orthonormality and do not suffer catastrophic cancellation when $|\phi| \in [90.0° - \epsilon_{\text{pole}}, 90.0°)$.
+- *Status:* **PROPOSED** (Subject to numerical stability testing across polar approach orbits).
+
+#### 3. Zenith Azimuth Indeterminacy ($\cos\text{EL}$) — `PROPOSED` ($1.0 \times 10^{-6}$)
+- Proximity limit where projection of the line-of-sight vector onto the horizontal $(\hat{E}, \hat{N})$ plane approaches zero norm ($\|\vec{v}_{\text{horiz}}\| \approx 0$).
+- When $\cos\text{EL} < 1.0 \times 10^{-6}$, azimuth calculation $\text{atan2}(E, N)$ becomes numerically ill-conditioned.
+- *Status:* **PROPOSED** (Subject to Monte Carlo sensitivity analysis of azimuth jitter vs elevation angle).
+
+#### 4. Round-Trip Frame Transformation Loss — `PROPOSED` (Orthogonality $\epsilon_{\text{ortho}} = 1.0 \times 10^{-15}$; Positional $\Delta r$ `UNRESOLVED`)
+- **Distinction between Dimensionless Orthogonality and Positional Error:**
+  - Matrix orthogonality error is dimensionless:
+    $$\epsilon_{\text{ortho}} = \|R^T R - I\|_{\infty}$$
+  - Positional round-trip error is measured in meters:
+    $$\Delta r = \|R^T (R \vec{r}) - \vec{r}\|$$
+  - Testing $R^T R = I$ evaluates purely algebraic matrix orthogonality, which does not prove a fixed $1\ \mu\text{m}$ positional error for vectors of arbitrary magnitude. Positional error scales with vector magnitude $\|\vec{r}\|$ and accumulates with repeated rotations.
+  - For a lunar radius vector ($\|\vec{r}\| \approx 1.74 \times 10^6\text{ m}$), double precision roundoff yields an intrinsic single-transform bound:
+    $$\Delta r_{\text{bound}} \sim \text{ULP}(1.74 \times 10^6\text{ m}) \approx 4.7 \times 10^{-10}\text{ m}$$
+- *Status:* Orthogonality metric is **PROPOSED**; positional round-trip threshold across mission trajectories is **UNRESOLVED**.
+
+#### 5. Horizons Acceptance Tolerance ($\Delta\theta$) — `UNRESOLVED` (Illustrative: $0.01°$)
+- An application accuracy target (e.g. $0.01° = 36''$) cannot be treated as a verified scientific tolerance until comparison methodology explicitly models and reconciles:
+  - Purely geometric vs apparent observables;
+  - One-way light-time correction ($\tau$);
+  - Stellar aberration;
+  - Gravitational light deflection;
+  - Reference frame orientation (ICRF vs DE440 vs DE421);
+  - Observation epoch and time scale (UTC vs UT vs TT vs TDB);
+  - Topocentric observer station coordinates and vertical datum.
+- *Status:* **UNRESOLVED** (Formal tolerance derivation requires empirical Horizons benchmark suite).
+
+| Threshold / Parameter | Value / Target | Category | Basis / Status Summary |
 |:---|:---:|:---:|:---|
-| **Zero-Vector Norm Threshold** ($\epsilon_{\text{zero}}$) | $1.0 \times 10^{-12}\text{ m}$ | **PROPOSED** | Required to prevent divide-by-zero during normalization. Sub-picometer threshold is well below any physical scale of interest (lunar radius $\sim 1.7 \times 10^6\text{ m}$) while remaining well above IEEE 754 double precision subnormal limits ($\sim 10^{-308}$). |
-| **Polar Singularity Angle** ($\epsilon_{\text{pole}}$) | $1.0 \times 10^{-7}\text{ rad}$ | **PROPOSED** | Scale-dependent threshold corresponding to $\sim 0.17\text{ m}$ horizontal displacement from true pole on the lunar surface. Verifies numerical stability of trigonometric projections before meridian convergence triggers indeterminacy. |
-| **Zenith Azimuth Indeterminacy** ($\cos\text{EL}$) | $1.0 \times 10^{-6}$ | **PROPOSED** | Angular proximity limit where projection onto horizontal $(E, N)$ plane approaches zero norm, producing numerical noise in $\text{atan2}(E, N)$. |
-| **Horizons Acceptance Tolerance** ($\Delta\theta$) | $0.01°$ ($36''$) | **UNRESOLVED** | Application accuracy target for validation testing between Horizons topocentric observer tables and internal geometric vector models, subject to verification of light-time and aberration effects. |
-| **Round-Trip Frame Transform Loss** ($\Delta r$) | $1.0 \times 10^{-6}\text{ m}$ | **PROPOSED** | Numerical precision limit ($1\ \mu\text{m}$) verifying matrix orthogonality ($R^T R = I$) across sequential spatial frame transformations using 64-bit IEEE 754 arithmetic. |
+| **Zero-Vector Norm Threshold** ($\epsilon_{\text{zero}}$) | $1.0 \times 10^{-12}\text{ m}$ (Illustrative) | **UNRESOLVED** | Coordinate spacing at lunar scale ($\text{ULP} \sim 4.7 \times 10^{-10}\text{ m}$) differs from local displacement vectors; requires dual/relative threshold strategy. |
+| **Polar Singularity Angle** ($\epsilon_{\text{pole}}$) | $1.0 \times 10^{-7}\text{ rad}$ ($\sim 0.17\text{ m}$) | **PROPOSED** | Scale-dependent; requires numerical stability validation of trigonometric projections near pole. |
+| **Zenith Azimuth Indeterminacy** ($\cos\text{EL}$) | $1.0 \times 10^{-6}$ | **PROPOSED** | Governs numerical conditioning of $\text{atan2}(E, N)$ as horizontal projection vanishes. |
+| **Matrix Orthogonality Loss** ($\epsilon_{\text{ortho}}$) | $1.0 \times 10^{-15}$ | **PROPOSED** | Dimensionless metric $\|R^T R - I\|_\infty$ testing algebraic orthogonality. |
+| **Positional Frame Transform Loss** ($\Delta r$) | Dependent on $\|\vec{r}\|$ | **UNRESOLVED** | Positional error scales with vector magnitude and accumulated rotations; cannot be fixed universally to $1\ \mu\text{m}$. |
+| **Horizons Acceptance Tolerance** ($\Delta\theta$) | $0.01°$ (Illustrative target) | **UNRESOLVED** | Requires reconciliation of light-time, aberration, gravity deflection, and vertical datum before tolerance is locked. |
 
-*Rule:* None of the above proposed thresholds shall become locked project contracts until the specified verification tests have been executed and documented.
+*Rule:* None of the above thresholds shall become locked project contracts until the specified numerical and empirical verification tests have been executed and documented.
 
 ---
 
