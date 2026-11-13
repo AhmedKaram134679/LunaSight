@@ -2,7 +2,8 @@ import 'package:luna_sight/features/nasa_data/domain/entities/nasa_product_defin
 
 /// Authoritative catalog of official NASA lunar products supported by LunaSight.
 ///
-/// Every product registered here must be grounded in officially published NASA metadata.
+/// Grounded strictly in officially published metadata on the NASA GSFC PGDA product page:
+/// https://pgda.gsfc.nasa.gov/products/81
 class NasaProductCatalog {
   NasaProductCatalog._();
 
@@ -20,8 +21,11 @@ class NasaProductCatalog {
       'https://pgda.gsfc.nasa.gov/data/LOLA_5mpp/87S/ldem_87s_5mpp.tif',
     ),
     format: 'GeoTIFF',
-    publishedSizeBytes: 3465285714, // Exact HTTP Content-Length (3.46 GB / ~3.3 GB uncompressed)
-    publishedSizeDescription: '~3.3 GB',
+    // Published documentation specifies "3.3GB GeoTIFF of surface height Z (meters)".
+    // Exact byte length is not published in the HTML documentation text, so publishedSizeBytes is explicitly null,
+    // preserving provenance distinction from runtime HTTP Content-Length.
+    publishedSizeDescription: '3.3GB',
+    publishedSizeBytes: null,
     spatialResolution: 5.0,
     spatialResolutionUnit: 'm/pixel',
     horizontalCoordinateSystem: 'South Polar Stereographic, meters (X/Y coordinates follow Generic Mapping Tools convention)',
@@ -35,7 +39,9 @@ class NasaProductCatalog {
     coverageDescription: 'Lunar South Pole mosaic covering 87°S to 90°S constructed from 97 individual 20x20 km fields with 2 km overlaps',
     processingNotes: 'Track adjustment, cleaning routines, rigid 3-D translations, and cosine taper weight blending in 2 km overlap regions. Interpolation is used to fill areas without measurements. Typical RMS residual of 30-55 cm with individual fields.',
     citation: 'Barker et al., 2021, "Improved LOLA Elevation Maps for South Pole Landing Sites: Error Estimates and Their Impact on Illumination Conditions", Planetary & Space Science, Volume 203, 105119, https://doi.org/10.1016/j.pss.2020.105119',
-    publicationDate: DateTime.utc(2021, 10, 14, 12, 54, 49),
+    // The web page does not state an explicit publication date in its metadata/body text.
+    // HTTP Last-Modified is a web server timestamp, not an official publication date.
+    publicationDate: null,
   );
 
   /// All officially supported product definitions.

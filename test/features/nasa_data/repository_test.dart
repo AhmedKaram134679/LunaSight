@@ -3,17 +3,42 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart' as http_testing;
-import 'package:luna_sight/features/nasa_data/data/datasources/nasa_product_catalog.dart';
 import 'package:luna_sight/features/nasa_data/data/repositories/nasa_data_repository_impl.dart';
 import 'package:luna_sight/features/nasa_data/data/services/nasa_http_service.dart';
 import 'package:luna_sight/features/nasa_data/data/storage/local_data_storage_service.dart';
 import 'package:luna_sight/features/nasa_data/domain/entities/acquisition_status.dart';
+import 'package:luna_sight/features/nasa_data/domain/entities/nasa_product_definition.dart';
 import 'package:luna_sight/features/nasa_data/domain/failures/nasa_data_failures.dart';
 import 'package:luna_sight/features/nasa_data/domain/services/nasa_data_service.dart';
 
 void main() {
   late Directory tempDir;
   late LocalDataStorageService storage;
+
+  final testProduct = NasaProductDefinition(
+    identifier: 'test_lunar_elevation',
+    title: 'Test Lunar Elevation Model',
+    sourceOrganization: 'NASA GSFC PGDA',
+    officialProductPageUrl: Uri.parse('https://pgda.gsfc.nasa.gov/products/81'),
+    officialAssetUrl: Uri.parse(
+      'https://pgda.gsfc.nasa.gov/data/LOLA_5mpp/87S/ldem_87s_5mpp.tif',
+    ),
+    format: 'GeoTIFF',
+    publishedSizeBytes: 1024,
+    publishedSizeDescription: '1 KB test',
+    spatialResolution: 5.0,
+    spatialResolutionUnit: 'm/pixel',
+    horizontalCoordinateSystem: 'South Polar Stereographic',
+    horizontalCoordinateUnit: 'meters',
+    referenceFrame: 'MOON_ME',
+    ephemerisAssociation: 'DE421',
+    pixelRegistration: PixelRegistration.pixelRegistered,
+    elevationMeasurement: 'Surface height',
+    elevationUnit: 'meters',
+    coverageDescription: 'Polar 87S-90S',
+    processingNotes: 'Test fixture',
+    citation: 'Barker et al., 2021',
+  );
 
   setUp(() async {
     tempDir = await Directory.systemTemp.createTemp('nasa_repo_test_');
@@ -27,188 +52,189 @@ void main() {
     }
   });
 
-  group('NasaDataRepository & Service Tests', () {
+  group('NasaDataRepository Lifecycle Tests', () {
     test(
-      'getAvailableProducts returns non-empty list containing ldem_87s_5mpp',
-      () {
-        final repository = NasaDataRepositoryImpl(
-          httpService: NasaHttpService(),
-          storageService: storage,
-        );
-
-        final products = repository.getAvailableProducts();
-        expect(products.isNotEmpty, isTrue);
-        expect(products.any((p) => p.identifier == 'ldem_87s_5mpp'), isTrue);
-      },
-    );
-
-    test(
-      'acquireProductAsset full lifecycle: waiting -> downloading -> completed',
+      'Successful acquisition lifecycle: waiting -> downloading -> completed',
       () async {
-        final product = NasaProductCatalog.ldem87s5mpp;
+        final payload = List.generate(1024, (i) => i % 256);
 
-        // Mock client that returns the exact expected length in chunks
-        final payload = List.filled(1024, 42);
         final mockClient = http_testing.MockClient((request) async {
-          expect(request.url, product.officialAssetUrl);
           return http.Response.bytes(
             payload,
             200,
-            headers: {
-              'content-length': '${payload.length}',
-              'etag': '"test-etag"',
-            },
+            headers: {'content-length': '1024', 'etag': '"complete-etag"'},
           );
-        });
-
-        final httpService = NasaHttpService(client: mockClient);
-        final repository = NasaDataRepositoryImpl(
-          httpService: httpService,
-          storageService: storage,
-        );
-
-        final service = NasaDataService(repository: repository);
-
-        final recordedStates = <AcquisitionLifecycleState>[];
-        final subscription = service.observeProgress(product.identifier).listen(
-          (prog) {
-            recordedStates.add(prog.state);
-          },
-        );
-
-        // Because ldem87s5mpp defines publishedSizeBytes: 3465285714, a 1024 payload will fail size integrity check
-        // verifying that integrity failure is properly caught and state set to integrityCheckFailed!
-        await expectLater(
-          () => service.acquireDataset(product.identifier),
-          throwsA(isA<IntegrityValidationFailure>()),
-        );
-
-        await Future<void>.delayed(const Duration(milliseconds: 20));
-        expect(
-          service.currentProgress(product.identifier).state,
-          AcquisitionLifecycleState.integrityCheckFailed,
-        );
-        expect(recordedStates, contains(AcquisitionLifecycleState.waiting));
-        expect(recordedStates, contains(AcquisitionLifecycleState.downloading));
-        expect(
-          recordedStates,
-          contains(AcquisitionLifecycleState.integrityCheckFailed),
-        );
-
-        await subscription.cancel();
-      },
-    );
-
-    test(
-      'Throws ProductNotFoundFailure on unregistered product acquisition',
-      () async {
-        final repository = NasaDataRepositoryImpl(
-          httpService: NasaHttpService(),
-          storageService: storage,
-        );
-
-        await expectLater(
-          () => repository.acquireProductAsset('unknown_product_id'),
-          throwsA(isA<ProductNotFoundFailure>()),
-        );
-      },
-    );
-
-    test(
-      'Prevents duplicate concurrent acquisitions of the same product',
-      () async {
-        final mockClient = http_testing.MockClient((request) async {
-          // Long-running transfer
-          await Future<void>.delayed(const Duration(milliseconds: 200));
-          return http.Response('content', 200);
         });
 
         final repository = NasaDataRepositoryImpl(
           httpService: NasaHttpService(client: mockClient),
           storageService: storage,
+          customProductCatalog: [testProduct],
         );
 
-        // Start first acquisition
-        final future1 = repository.acquireProductAsset('ldem_87s_5mpp');
+        final service = NasaDataService(repository: repository);
+        final states = <AcquisitionLifecycleState>[];
 
-        // Attempt second concurrent acquisition
+        final sub = service.observeProgress('test_lunar_elevation').listen((p) {
+          states.add(p.state);
+        });
+
+        final metadata = await service.acquireDataset('test_lunar_elevation');
+
+        expect(metadata.fileSizeBytes, 1024);
         expect(
-          () => repository.acquireProductAsset('ldem_87s_5mpp'),
+          metadata.verificationLevel,
+          IntegrityVerificationLevel.sizeVerified,
+        );
+        expect(metadata.isIntegrityVerified, isTrue);
+
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+
+        expect(states, contains(AcquisitionLifecycleState.waiting));
+        expect(states, contains(AcquisitionLifecycleState.downloading));
+        expect(states, contains(AcquisitionLifecycleState.completed));
+
+        expect(
+          await service.isDatasetAvailable('test_lunar_elevation'),
+          isTrue,
+        );
+
+        await sub.cancel();
+      },
+    );
+
+    test('Re-acquisition reuses existing verified asset without re-downloading unless forced', () async {
+      int downloadAttempts = 0;
+      final mockClient = http_testing.MockClient((request) async {
+        downloadAttempts++;
+        return http.Response.bytes(
+          List.filled(1024, 0),
+          200,
+          headers: {'content-length': '1024'},
+        );
+      });
+
+      final repository = NasaDataRepositoryImpl(
+        httpService: NasaHttpService(client: mockClient),
+        storageService: storage,
+        customProductCatalog: [testProduct],
+      );
+
+      // First acquisition
+      await repository.acquireProductAsset('test_lunar_elevation');
+      expect(downloadAttempts, 1);
+
+      // Second acquisition without force
+      final cachedMeta = await repository.acquireProductAsset(
+        'test_lunar_elevation',
+      );
+      expect(cachedMeta.fileSizeBytes, 1024);
+      expect(downloadAttempts, 1); // No new download
+
+      // Force re-acquisition
+      await repository.acquireProductAsset(
+        'test_lunar_elevation',
+        forceReacquire: true,
+      );
+      expect(downloadAttempts, 2); // Downloaded again
+    });
+
+    test(
+      'Prevents duplicate concurrent acquisitions of the same product',
+      () async {
+        final mockClient = http_testing.MockClient((request) async {
+          await Future<void>.delayed(const Duration(milliseconds: 150));
+          return http.Response('data', 200);
+        });
+
+        final repository = NasaDataRepositoryImpl(
+          httpService: NasaHttpService(client: mockClient),
+          storageService: storage,
+          customProductCatalog: [testProduct],
+        );
+
+        final future1 = repository.acquireProductAsset('test_lunar_elevation');
+
+        expect(
+          () => repository.acquireProductAsset('test_lunar_elevation'),
           throwsA(isA<AcquisitionConflictFailure>()),
         );
 
-        // Cancel to clean up
-        await repository.cancelAcquisition('ldem_87s_5mpp');
+        await repository.cancelAcquisition('test_lunar_elevation');
         try {
           await future1;
         } catch (_) {}
       },
     );
 
-    test('Cancellation transitions status to cancelled and aborts', () async {
-      final mockClient = http_testing.MockClient.streaming((
-        request,
-        bodyStream,
-      ) async {
-        final stream = Stream<List<int>>.periodic(
-          const Duration(milliseconds: 50),
-          (count) => [count],
+    test(
+      'Cancellation transitions status to cancelled and aborts transfer',
+      () async {
+        final mockClient = http_testing.MockClient.streaming((
+          request,
+          bodyStream,
+        ) async {
+          final stream = Stream<List<int>>.periodic(
+            const Duration(milliseconds: 30),
+            (count) => [count],
+          );
+          return http.StreamedResponse(stream, 200);
+        });
+
+        final repository = NasaDataRepositoryImpl(
+          httpService: NasaHttpService(client: mockClient),
+          storageService: storage,
+          customProductCatalog: [testProduct],
         );
-        return http.StreamedResponse(stream, 200);
-      });
 
-      final repository = NasaDataRepositoryImpl(
-        httpService: NasaHttpService(client: mockClient),
-        storageService: storage,
-      );
+        final future = repository.acquireProductAsset('test_lunar_elevation');
 
-      final states = <AcquisitionLifecycleState>[];
-      repository.watchAcquisitionProgress('ldem_87s_5mpp').listen((p) {
-        states.add(p.state);
-      });
+        await Future<void>.delayed(const Duration(milliseconds: 40));
+        await repository.cancelAcquisition('test_lunar_elevation');
 
-      final acquisitionFuture = repository.acquireProductAsset('ldem_87s_5mpp');
+        await expectLater(future, throwsA(isA<AcquisitionCancelledFailure>()));
 
-      // Allow to enter downloading
-      await Future<void>.delayed(const Duration(milliseconds: 40));
-      await repository.cancelAcquisition('ldem_87s_5mpp');
+        expect(
+          repository.getAcquisitionProgress('test_lunar_elevation').state,
+          AcquisitionLifecycleState.cancelled,
+        );
+      },
+    );
 
-      await expectLater(
-        acquisitionFuture,
-        throwsA(isA<AcquisitionCancelledFailure>()),
-      );
+    test(
+      'removeCachedAsset clears file, metadata, and resets progress',
+      () async {
+        final payload = List.generate(1024, (i) => i % 256);
+        final mockClient = http_testing.MockClient((request) async {
+          return http.Response.bytes(
+            payload,
+            200,
+            headers: {'content-length': '1024'},
+          );
+        });
 
-      final current = repository.getAcquisitionProgress('ldem_87s_5mpp');
-      expect(current.state, AcquisitionLifecycleState.cancelled);
-    });
+        final repository = NasaDataRepositoryImpl(
+          httpService: NasaHttpService(client: mockClient),
+          storageService: storage,
+          customProductCatalog: [testProduct],
+        );
 
-    test('removeCachedAsset cleans files and resets status', () async {
-      final repository = NasaDataRepositoryImpl(
-        httpService: NasaHttpService(),
-        storageService: storage,
-      );
+        await repository.acquireProductAsset('test_lunar_elevation');
+        expect(
+          await repository.isAssetLocallyAvailable('test_lunar_elevation'),
+          isTrue,
+        );
 
-      // Simulate completed file
-      final tempFile = storage.getTempFile('ldem_87s_5mpp');
-      await tempFile.writeAsBytes([1, 2, 3]);
-      await storage.commitAsset(
-        productId: 'ldem_87s_5mpp',
-        tempFile: tempFile,
-        fileExtension: 'tif',
-      );
-
-      expect(await repository.isAssetLocallyAvailable('ldem_87s_5mpp'), isTrue);
-
-      await repository.removeCachedAsset('ldem_87s_5mpp');
-
-      expect(
-        await repository.isAssetLocallyAvailable('ldem_87s_5mpp'),
-        isFalse,
-      );
-      expect(
-        repository.getAcquisitionProgress('ldem_87s_5mpp').state,
-        AcquisitionLifecycleState.notRequested,
-      );
-    });
+        await repository.removeCachedAsset('test_lunar_elevation');
+        expect(
+          await repository.isAssetLocallyAvailable('test_lunar_elevation'),
+          isFalse,
+        );
+        expect(
+          repository.getAcquisitionProgress('test_lunar_elevation').state,
+          AcquisitionLifecycleState.notRequested,
+        );
+      },
+    );
   });
 }

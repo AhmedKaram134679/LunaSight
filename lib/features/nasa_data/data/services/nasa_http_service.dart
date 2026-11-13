@@ -15,12 +15,14 @@ typedef OnBytesReceivedCallback = void Function(
 /// Remote HTTP communication service tailored for NASA GSFC PGDA data endpoints.
 class NasaHttpService {
   final http.Client _client;
-  final Duration requestTimeout;
+  final Duration headerTimeout;
+  final Duration streamIdleTimeout;
   final int maxRetries;
 
   NasaHttpService({
     http.Client? client,
-    this.requestTimeout = const Duration(seconds: 45),
+    this.headerTimeout = const Duration(seconds: 45),
+    this.streamIdleTimeout = const Duration(seconds: 30),
     this.maxRetries = 3,
   }) : _client = client ?? http.Client();
 
@@ -32,7 +34,7 @@ class NasaHttpService {
       final request = http.Request('HEAD', uri);
       final streamedResponse = await _client
           .send(request)
-          .timeout(requestTimeout);
+          .timeout(headerTimeout);
       final response = await http.Response.fromStream(streamedResponse);
 
       _validateStatusCode(response.statusCode, uri, response.headers);
@@ -57,6 +59,9 @@ class NasaHttpService {
   }
 
   /// Downloads an official NASA asset, supporting resume if ranges are supported.
+  ///
+  /// Recalculates file length on every attempt, validates Content-Range, Content-Length,
+  /// respects stream idle timeouts, and gracefully recovers from HTTP 416 or 200 responses.
   Future<DownloadCompletionInfo> streamDownloadToFile({
     required Uri uri,
     required File destinationFile,
@@ -66,24 +71,68 @@ class NasaHttpService {
   }) async {
     _ensureTrustedNasaUri(uri);
 
-    int existingBytes = 0;
-    if (await destinationFile.exists()) {
-      existingBytes = await destinationFile.length();
-    }
-
     return _executeWithRetry(() async {
-      final request = http.Request('GET', uri);
+      if (cancelSignal != null && cancelSignal.isCompleted) {
+        throw const AcquisitionCancelledFailure();
+      }
 
+      // Requirement 1 & 2: Recalculate actual file length immediately before every request attempt
+      int existingBytes = 0;
+      if (await destinationFile.exists()) {
+        existingBytes = await destinationFile.length();
+      }
+
+      // If existing bytes already match or exceed expected total, check if 416 or finished
+      if (expectedTotalBytes != null && existingBytes > expectedTotalBytes) {
+        AppLogger.warning(
+          'Existing file size ($existingBytes) exceeds expected ($expectedTotalBytes). Resetting.',
+        );
+        if (await destinationFile.exists()) {
+          await destinationFile.delete();
+        }
+        existingBytes = 0;
+      }
+
+      final request = http.Request('GET', uri);
       final willAttemptResume = existingBytes > 0;
       if (willAttemptResume) {
         request.headers['Range'] = 'bytes=$existingBytes-';
       }
 
-      final streamedResponse = await _client
-          .send(request)
-          .timeout(requestTimeout);
+      http.StreamedResponse streamedResponse;
+      try {
+        streamedResponse = await _client
+            .send(request)
+            .timeout(
+              headerTimeout,
+              onTimeout: () => throw const NasaNetworkFailure(
+                message: 'Timeout waiting for NASA server headers.',
+              ),
+            );
+      } catch (e) {
+        if (e is NasaDataFailure) rethrow;
+        throw NasaNetworkFailure(
+          message: 'Failed to establish connection to NASA server: $e',
+          cause: e,
+        );
+      }
+
       final statusCode = streamedResponse.statusCode;
       final headers = streamedResponse.headers;
+
+      // Handle 416 Range Not Satisfiable by resetting corrupted/stale partial file
+      if (statusCode == 416) {
+        AppLogger.warning(
+          'NASA server returned 416 Range Not Satisfiable for offset $existingBytes. Resetting partial file.',
+        );
+        if (await destinationFile.exists()) {
+          await destinationFile.delete();
+        }
+        throw const NasaNetworkFailure(
+          message: 'Range Not Satisfiable (HTTP 416). Resetting file for clean download.',
+          statusCode: 416,
+        );
+      }
 
       _validateStatusCode(statusCode, uri, headers);
 
@@ -92,31 +141,66 @@ class NasaHttpService {
       int? effectiveTotalBytes;
 
       if (statusCode == 206) {
-        // Partial Content verified
-        final contentRange = headers['content-range'];
-        final rangeInfo = _parseContentRange(contentRange);
-        if (rangeInfo == null || rangeInfo.start != existingBytes) {
-          // Inconsistent range received; reset file to prevent corrupted byte alignment
+        // Requirement 3 & 4: Validate all Content-Range components
+        final contentRangeHeader = headers['content-range'];
+        final rangeInfo = _parseContentRange(contentRangeHeader);
+
+        if (rangeInfo == null) {
+          throw const NasaNetworkFailure(
+            message:
+                'Malformed or missing Content-Range header in 206 response.',
+            statusCode: 206,
+          );
+        }
+
+        // Start offset must match existing local bytes exactly
+        if (rangeInfo.start != existingBytes) {
           AppLogger.warning(
-            'Received inconsistent range "$contentRange" for expected offset $existingBytes. Resetting transfer.',
+            'Inconsistent range start (${rangeInfo.start}) for local offset $existingBytes. Resetting file.',
           );
           if (await destinationFile.exists()) {
             await destinationFile.delete();
           }
           throw const NasaNetworkFailure(
-            message: 'Inconsistent Content-Range received from server during resume.',
+            message: 'Inconsistent Content-Range start received during resume.',
             statusCode: 206,
           );
         }
+
+        // Total resource size check
+        if (rangeInfo.total != null &&
+            expectedTotalBytes != null &&
+            rangeInfo.total != expectedTotalBytes) {
+          throw IntegrityValidationFailure(
+            message:
+                'Content-Range total (${rangeInfo.total}) does not match expected size ($expectedTotalBytes).',
+            expectedSize: expectedTotalBytes,
+            actualSize: rangeInfo.total,
+          );
+        }
+
+        // Content-Length consistency with range length
+        final lengthHeader = headers['content-length'];
+        if (lengthHeader != null) {
+          final declaredLength = int.tryParse(lengthHeader);
+          final expectedRangeLength = (rangeInfo.end - rangeInfo.start) + 1;
+          if (declaredLength != null && declaredLength != expectedRangeLength) {
+            throw const NasaNetworkFailure(
+              message:
+                  'Content-Length does not match Content-Range declared span.',
+              statusCode: 206,
+            );
+          }
+        }
+
         effectiveTotalBytes = rangeInfo.total ?? expectedTotalBytes;
         bytesReceivedSoFar = existingBytes;
         sink = destinationFile.openWrite(mode: FileMode.append);
       } else if (statusCode == 200) {
-        // Normal Full Stream
+        // Requirement 7: If a resume attempt receives 200, restart safely from byte zero
         if (willAttemptResume) {
-          // Server did not satisfy range; reset partial file to prevent corrupted duplication
           AppLogger.info(
-            'Server responded with 200 OK instead of 206 Partial Content. Resetting local partial file.',
+            'Server responded with 200 OK instead of 206 Partial Content. Resetting partial file to avoid byte duplication.',
           );
           if (await destinationFile.exists()) {
             await destinationFile.delete();
@@ -139,15 +223,38 @@ class NasaHttpService {
 
       StreamSubscription<List<int>>? subscription;
       final streamCompleter = Completer<void>();
+      Timer? idleTimer;
+
+      void resetIdleTimeout() {
+        idleTimer?.cancel();
+        idleTimer = Timer(streamIdleTimeout, () {
+          subscription?.cancel();
+          if (!streamCompleter.isCompleted) {
+            streamCompleter.completeError(
+              NasaNetworkFailure(
+                message:
+                    'Stream idle timeout exceeded (${streamIdleTimeout.inSeconds}s without data).',
+              ),
+            );
+          }
+        });
+      }
+
+      resetIdleTimeout();
 
       try {
         subscription = streamedResponse.stream.listen(
           (chunk) {
+            resetIdleTimeout();
+
             if (cancelSignal != null && cancelSignal.isCompleted) {
+              idleTimer?.cancel();
               subscription?.cancel();
-              streamCompleter.completeError(
-                const AcquisitionCancelledFailure(),
-              );
+              if (!streamCompleter.isCompleted) {
+                streamCompleter.completeError(
+                  const AcquisitionCancelledFailure(),
+                );
+              }
               return;
             }
 
@@ -156,22 +263,29 @@ class NasaHttpService {
             onProgress?.call(bytesReceivedSoFar, effectiveTotalBytes);
           },
           onError: (Object error, StackTrace stack) {
-            streamCompleter.completeError(
-              NasaNetworkFailure(
-                message: 'Stream transmission failed: $error',
-                cause: error,
-                stackTrace: stack,
-              ),
-            );
+            idleTimer?.cancel();
+            if (!streamCompleter.isCompleted) {
+              streamCompleter.completeError(
+                NasaNetworkFailure(
+                  message: 'Stream transmission failed: $error',
+                  cause: error,
+                  stackTrace: stack,
+                ),
+              );
+            }
           },
           onDone: () {
-            streamCompleter.complete();
+            idleTimer?.cancel();
+            if (!streamCompleter.isCompleted) {
+              streamCompleter.complete();
+            }
           },
           cancelOnError: true,
         );
 
         if (cancelSignal != null) {
           cancelSignal.future.then((_) {
+            idleTimer?.cancel();
             if (!streamCompleter.isCompleted) {
               subscription?.cancel();
               streamCompleter.completeError(
@@ -183,11 +297,12 @@ class NasaHttpService {
 
         await streamCompleter.future;
       } finally {
+        idleTimer?.cancel();
         await sink.flush();
         await sink.close();
       }
 
-      // Check Content-Length integrity if server supplied it
+      // Check Content-Length integrity if expected total was supplied
       if (effectiveTotalBytes != null &&
           bytesReceivedSoFar != effectiveTotalBytes) {
         throw IntegrityValidationFailure(
@@ -263,6 +378,7 @@ class NasaHttpService {
       try {
         return await action();
       } catch (e) {
+        // Never retry permanent errors or cancellations
         if (e is NasaForbiddenFailure ||
             (e is NasaNetworkFailure && e.statusCode == 404) ||
             e is UntrustedUrlFailure ||
@@ -294,6 +410,8 @@ class NasaHttpService {
     final end = int.parse(match.group(2)!);
     final totalStr = match.group(3)!;
     final total = totalStr == '*' ? null : int.parse(totalStr);
+
+    if (end < start) return null;
 
     return (start: start, end: end, total: total);
   }

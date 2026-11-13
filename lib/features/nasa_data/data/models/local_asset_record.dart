@@ -9,7 +9,7 @@ class LocalAssetRecord {
   final int fileSizeBytes;
   final DateTime acquiredAt;
   final String? sha256Digest;
-  final bool isIntegrityVerified;
+  final IntegrityVerificationLevel verificationLevel;
   final String? etag;
   final String? lastModifiedHeader;
 
@@ -19,7 +19,7 @@ class LocalAssetRecord {
     required this.fileSizeBytes,
     required this.acquiredAt,
     this.sha256Digest,
-    this.isIntegrityVerified = false,
+    this.verificationLevel = IntegrityVerificationLevel.notVerified,
     this.etag,
     this.lastModifiedHeader,
   });
@@ -31,7 +31,7 @@ class LocalAssetRecord {
       fileSizeBytes: fileSizeBytes,
       lastModified: acquiredAt,
       sha256Digest: sha256Digest,
-      isIntegrityVerified: isIntegrityVerified,
+      verificationLevel: verificationLevel,
     );
   }
 
@@ -41,19 +41,53 @@ class LocalAssetRecord {
     'fileSizeBytes': fileSizeBytes,
     'acquiredAt': acquiredAt.toIso8601String(),
     'sha256Digest': sha256Digest,
-    'isIntegrityVerified': isIntegrityVerified,
+    'verificationLevel': verificationLevel.name,
     'etag': etag,
     'lastModifiedHeader': lastModifiedHeader,
   };
 
   factory LocalAssetRecord.fromJson(Map<String, dynamic> json) {
+    final productId = json['productId'];
+    final relativeFilePath = json['relativeFilePath'];
+    final fileSizeBytes = json['fileSizeBytes'];
+    final acquiredAtStr = json['acquiredAt'];
+
+    if (productId is! String ||
+        relativeFilePath is! String ||
+        fileSizeBytes is! int ||
+        fileSizeBytes < 0 ||
+        acquiredAtStr is! String) {
+      throw const FormatException(
+        'Invalid or missing fields in LocalAssetRecord JSON',
+      );
+    }
+
+    final acquiredAt = DateTime.tryParse(acquiredAtStr);
+    if (acquiredAt == null) {
+      throw const FormatException('Invalid acquiredAt timestamp format');
+    }
+
+    IntegrityVerificationLevel level = IntegrityVerificationLevel.notVerified;
+    if (json.containsKey('verificationLevel')) {
+      final levelStr = json['verificationLevel'] as String?;
+      level = IntegrityVerificationLevel.values.firstWhere(
+        (e) => e.name == levelStr,
+        orElse: () => IntegrityVerificationLevel.notVerified,
+      );
+    } else if (json['isIntegrityVerified'] == true) {
+      // Backward compatibility with previous records
+      level = (json['sha256Digest'] != null)
+          ? IntegrityVerificationLevel.sha256Verified
+          : IntegrityVerificationLevel.sizeVerified;
+    }
+
     return LocalAssetRecord(
-      productId: json['productId'] as String,
-      relativeFilePath: json['relativeFilePath'] as String,
-      fileSizeBytes: json['fileSizeBytes'] as int,
-      acquiredAt: DateTime.parse(json['acquiredAt'] as String),
+      productId: productId,
+      relativeFilePath: relativeFilePath,
+      fileSizeBytes: fileSizeBytes,
+      acquiredAt: acquiredAt,
       sha256Digest: json['sha256Digest'] as String?,
-      isIntegrityVerified: json['isIntegrityVerified'] as bool? ?? false,
+      verificationLevel: level,
       etag: json['etag'] as String?,
       lastModifiedHeader: json['lastModifiedHeader'] as String?,
     );
@@ -63,7 +97,8 @@ class LocalAssetRecord {
 
   static LocalAssetRecord? tryDeserialize(String jsonStr) {
     try {
-      final map = jsonDecode(jsonStr) as Map<String, dynamic>;
+      final map = jsonDecode(jsonStr);
+      if (map is! Map<String, dynamic>) return null;
       return LocalAssetRecord.fromJson(map);
     } catch (_) {
       return null;

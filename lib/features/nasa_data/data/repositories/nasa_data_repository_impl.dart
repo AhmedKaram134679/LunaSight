@@ -13,6 +13,7 @@ import 'package:luna_sight/features/nasa_data/domain/repositories/nasa_data_repo
 class NasaDataRepositoryImpl implements NasaDataRepository {
   final NasaHttpService httpService;
   final LocalDataStorageService storageService;
+  final List<NasaProductDefinition>? customProductCatalog;
 
   final Map<String, Completer<void>> _activeCancellations = {};
   final Map<String, StreamController<AcquisitionProgress>>
@@ -22,16 +23,24 @@ class NasaDataRepositoryImpl implements NasaDataRepository {
   NasaDataRepositoryImpl({
     required this.httpService,
     required this.storageService,
+    this.customProductCatalog,
   });
+
+  List<NasaProductDefinition> get _catalog =>
+      customProductCatalog ?? NasaProductCatalog.allProducts;
 
   @override
   List<NasaProductDefinition> getAvailableProducts() {
-    return NasaProductCatalog.allProducts;
+    return _catalog;
   }
 
   @override
   Future<NasaProductDefinition?> getProductById(String productId) async {
-    return NasaProductCatalog.findById(productId);
+    try {
+      return _catalog.firstWhere((p) => p.identifier == productId);
+    } catch (_) {
+      return null;
+    }
   }
 
   @override
@@ -68,7 +77,7 @@ class NasaDataRepositoryImpl implements NasaDataRepository {
     String productId, {
     bool forceReacquire = false,
   }) async {
-    final product = NasaProductCatalog.findById(productId);
+    final product = await getProductById(productId);
     if (product == null) {
       throw ProductNotFoundFailure(productId: productId);
     }

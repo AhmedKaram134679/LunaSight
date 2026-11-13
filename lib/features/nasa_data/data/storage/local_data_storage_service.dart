@@ -21,11 +21,12 @@ class LocalDataStorageService {
   Directory get _metaDir =>
       Directory('${baseStorageDirectory.path}${Platform.pathSeparator}meta');
 
-  /// Ensures storage directories exist.
+  /// Ensures storage directories exist and cleans any orphaned temporary files.
   Future<void> initialize() async {
     await _completedDir.create(recursive: true);
     await _tempDir.create(recursive: true);
     await _metaDir.create(recursive: true);
+    await recoverOrphanedStagedFiles();
   }
 
   /// Path to a temporary file during transfer.
@@ -52,15 +53,52 @@ class LocalDataStorageService {
     if (productId.contains('..') ||
         productId.contains('/') ||
         productId.contains('\\') ||
-        productId.isEmpty) {
+        productId.trim().isEmpty) {
       throw NasaStorageFailure(
         message: 'Invalid product identifier for storage path: "$productId"',
       );
     }
   }
 
+  /// Validates that a filename/relative path is strictly a single filename
+  /// within the completed directory and does not traverse outward.
+  File _resolveAndValidateCompletedFile(String relativeFilePath) {
+    if (relativeFilePath.contains('..') ||
+        relativeFilePath.contains('/') ||
+        relativeFilePath.contains('\\') ||
+        relativeFilePath.trim().isEmpty) {
+      throw NasaStorageFailure(
+        message:
+            'Path traversal detected in relativeFilePath: "$relativeFilePath"',
+      );
+    }
+
+    final file = File(
+      '${_completedDir.path}${Platform.pathSeparator}$relativeFilePath',
+    );
+
+    // Canonicalize paths and ensure target is inside _completedDir
+    final completedCanonical = _completedDir.resolveSymbolicLinksSync();
+    String fileCanonical;
+    try {
+      fileCanonical = file.resolveSymbolicLinksSync();
+    } catch (_) {
+      fileCanonical = file.absolute.path;
+    }
+
+    if (!fileCanonical.startsWith(completedCanonical)) {
+      throw NasaStorageFailure(
+        message:
+            'Target file outside completed storage directory: "$relativeFilePath"',
+      );
+    }
+
+    return file;
+  }
+
   /// Checks if an asset is present, intact, and matches its metadata record.
   Future<LocalAssetMetadata?> getVerifiedAsset(String productId) async {
+    _validateProductId(productId);
     final metaFile = _getMetaFile(productId);
     if (!await metaFile.exists()) {
       return null;
@@ -71,13 +109,31 @@ class LocalDataStorageService {
       final record = LocalAssetRecord.tryDeserialize(jsonStr);
       if (record == null) {
         AppLogger.warning('Corrupted cache record for $productId. Purging.');
-        await deleteAsset(productId);
+        await metaFile.delete();
         return null;
       }
 
-      final completedFile = File(
-        '${_completedDir.path}${Platform.pathSeparator}${record.relativeFilePath}',
-      );
+      // Security check: product ID in record must match requested product
+      if (record.productId != productId) {
+        AppLogger.warning(
+          'Security alert: record productId (${record.productId}) does not match requested ($productId). Purging.',
+        );
+        await metaFile.delete();
+        return null;
+      }
+
+      File completedFile;
+      try {
+        completedFile = _resolveAndValidateCompletedFile(
+          record.relativeFilePath,
+        );
+      } catch (e) {
+        AppLogger.warning(
+          'Invalid relative path in record for $productId: $e. Purging.',
+        );
+        await metaFile.delete();
+        return null;
+      }
 
       if (!await completedFile.exists()) {
         AppLogger.warning(
@@ -107,7 +163,10 @@ class LocalDataStorageService {
     }
   }
 
-  /// Atomically commits a completed temp file into the completed cache directory.
+  /// Safely and atomically commits a completed temp file into the completed cache directory.
+  ///
+  /// Never destroys a previous valid asset before validating the new asset.
+  /// Writes metadata to a staged temp file before atomically completing.
   Future<LocalAssetMetadata> commitAsset({
     required String productId,
     required File tempFile,
@@ -120,7 +179,7 @@ class LocalDataStorageService {
     _validateProductId(productId);
 
     if (!await tempFile.exists()) {
-      throw NasaStorageFailure(
+      throw const NasaStorageFailure(
         message: 'Cannot commit asset: temporary file does not exist.',
       );
     }
@@ -137,6 +196,9 @@ class LocalDataStorageService {
     }
 
     String? actualSha256;
+    IntegrityVerificationLevel verificationLevel =
+        IntegrityVerificationLevel.notVerified;
+
     if (expectedSha256 != null) {
       actualSha256 = await computeSha256(tempFile);
       if (actualSha256.toLowerCase() != expectedSha256.toLowerCase()) {
@@ -147,34 +209,126 @@ class LocalDataStorageService {
           actualSha256: actualSha256,
         );
       }
+      verificationLevel = IntegrityVerificationLevel.sha256Verified;
+    } else if (expectedSize != null) {
+      verificationLevel = IntegrityVerificationLevel.sizeVerified;
     }
 
-    final targetFile = getCompletedFile(productId, fileExtension);
-    if (await targetFile.exists()) {
-      await targetFile.delete();
+    final finalTargetFile = getCompletedFile(productId, fileExtension);
+    final relativeFileName = finalTargetFile.uri.pathSegments.last;
+
+    // Stage 1: Stage the new asset file in completed directory as .staged
+    final stagedAssetFile = File(
+      '${_completedDir.path}${Platform.pathSeparator}$productId.staged$fileExtension',
+    );
+    if (await stagedAssetFile.exists()) {
+      await stagedAssetFile.delete();
     }
 
-    // Atomic move / rename
-    await tempFile.rename(targetFile.path);
+    // Move tempFile to staged file
+    await tempFile.rename(stagedAssetFile.path);
 
+    // Stage 2: Stage metadata file
     final record = LocalAssetRecord(
       productId: productId,
-      relativeFilePath: targetFile.uri.pathSegments.last,
+      relativeFilePath: relativeFileName,
       fileSizeBytes: actualSize,
       acquiredAt: DateTime.now().toUtc(),
       sha256Digest: actualSha256,
-      isIntegrityVerified: expectedSize != null || expectedSha256 != null,
+      verificationLevel: verificationLevel,
       etag: etag,
       lastModifiedHeader: lastModifiedHeader,
     );
 
-    final metaFile = _getMetaFile(productId);
-    await metaFile.writeAsString(record.serialize());
+    final stagedMetaFile = File(
+      '${_metaDir.path}${Platform.pathSeparator}$productId.staged.json',
+    );
+    await stagedMetaFile.writeAsString(record.serialize(), flush: true);
 
-    return record.toEntity(targetFile.path);
+    // Stage 3: Atomic swap of file and metadata
+    // If an existing file exists, keep it as backup until replacement succeeds
+    File? backupFile;
+    if (await finalTargetFile.exists()) {
+      backupFile = File(
+        '${_completedDir.path}${Platform.pathSeparator}$productId.bak',
+      );
+      if (await backupFile.exists()) {
+        await backupFile.delete();
+      }
+      await finalTargetFile.rename(backupFile.path);
+    }
+
+    try {
+      // Rename staged asset to final target file
+      await stagedAssetFile.rename(finalTargetFile.path);
+
+      // Rename staged metadata to final metadata file
+      final finalMetaFile = _getMetaFile(productId);
+      await stagedMetaFile.rename(finalMetaFile.path);
+
+      // Success: clean up backup
+      if (backupFile != null && await backupFile.exists()) {
+        await backupFile.delete();
+      }
+
+      return record.toEntity(finalTargetFile.path);
+    } catch (e, stack) {
+      AppLogger.error(
+        'Failed atomic swap for $productId: $e. Restoring backup if available.',
+        error: e,
+        stackTrace: stack,
+      );
+
+      // Rollback: restore backup
+      if (backupFile != null && await backupFile.exists()) {
+        if (await finalTargetFile.exists()) {
+          await finalTargetFile.delete();
+        }
+        await backupFile.rename(finalTargetFile.path);
+      }
+
+      // Cleanup staged files
+      if (await stagedAssetFile.exists()) {
+        await stagedAssetFile.delete();
+      }
+      if (await stagedMetaFile.exists()) {
+        await stagedMetaFile.delete();
+      }
+
+      throw NasaStorageFailure(
+        message: 'Atomic commit failed for $productId: $e',
+        cause: e,
+        stackTrace: stack,
+      );
+    }
   }
 
-  /// Deletes an asset, its temp files, and its metadata.
+  /// Recovers any leftover staged files from interrupted operations.
+  Future<void> recoverOrphanedStagedFiles() async {
+    try {
+      if (await _completedDir.exists()) {
+        await for (final entity in _completedDir.list()) {
+          if (entity is File &&
+              (entity.path.endsWith('.staged') ||
+                  entity.path.contains('.staged.') ||
+                  entity.path.endsWith('.bak'))) {
+            await entity.delete();
+          }
+        }
+      }
+      if (await _metaDir.exists()) {
+        await for (final entity in _metaDir.list()) {
+          if (entity is File && entity.path.contains('.staged.')) {
+            await entity.delete();
+          }
+        }
+      }
+    } catch (e) {
+      AppLogger.warning('Error cleaning up orphaned staged files: $e');
+    }
+  }
+
+  /// Safely deletes an asset, its temp files, and its metadata.
   Future<void> deleteAsset(String productId) async {
     _validateProductId(productId);
 
@@ -188,12 +342,18 @@ class LocalDataStorageService {
       if (await metaFile.exists()) {
         final jsonStr = await metaFile.readAsString();
         final record = LocalAssetRecord.tryDeserialize(jsonStr);
-        if (record != null) {
-          final target = File(
-            '${_completedDir.path}${Platform.pathSeparator}${record.relativeFilePath}',
-          );
-          if (await target.exists()) {
-            await target.delete();
+        if (record != null && record.productId == productId) {
+          try {
+            final target = _resolveAndValidateCompletedFile(
+              record.relativeFilePath,
+            );
+            if (await target.exists()) {
+              await target.delete();
+            }
+          } catch (e) {
+            AppLogger.warning(
+              'Target file resolution failed during delete for $productId: $e',
+            );
           }
         }
         await metaFile.delete();

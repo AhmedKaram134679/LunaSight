@@ -15,6 +15,7 @@ enum PixelRegistration {
 /// Official published metadata for an authorized NASA planetary science dataset.
 ///
 /// Immutable representation of the official product specification from NASA GSFC PGDA.
+/// Grounded strictly in officially published metadata (https://pgda.gsfc.nasa.gov/products/81).
 @immutable
 class NasaProductDefinition {
   /// Unique identifier (e.g., 'ldem_87s_5mpp').
@@ -38,11 +39,12 @@ class NasaProductDefinition {
   /// File format (e.g., 'GeoTIFF').
   final String format;
 
-  /// Published file size in bytes, when officially published.
-  final int? publishedSizeBytes;
-
-  /// Published file size human-readable description (e.g., '~3.3 GB').
+  /// Officially published file size description (e.g. '3.3GB' or '~3.3 GB').
   final String? publishedSizeDescription;
+
+  /// Expected file size in bytes, when officially published or established from authoritative source.
+  /// Null if not published as an exact byte count in documentation.
+  final int? publishedSizeBytes;
 
   /// Spatial resolution numeric value (e.g. 5.0).
   final double spatialResolution;
@@ -80,7 +82,7 @@ class NasaProductDefinition {
   /// Primary scientific citation for the product.
   final String citation;
 
-  /// Published or updated date from official NASA metadata.
+  /// Published or updated date from official NASA metadata, if explicitly stated in documentation.
   final DateTime? publicationDate;
 
   const NasaProductDefinition({
@@ -91,8 +93,8 @@ class NasaProductDefinition {
     required this.officialProductPageUrl,
     required this.officialAssetUrl,
     required this.format,
-    this.publishedSizeBytes,
     this.publishedSizeDescription,
+    this.publishedSizeBytes,
     required this.spatialResolution,
     required this.spatialResolutionUnit,
     required this.horizontalCoordinateSystem,

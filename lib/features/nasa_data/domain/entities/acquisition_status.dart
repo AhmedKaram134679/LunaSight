@@ -1,5 +1,17 @@
 import 'package:flutter/foundation.dart';
 
+/// Level of verification performed on a locally cached asset.
+enum IntegrityVerificationLevel {
+  /// Not verified or verification has not been run.
+  notVerified,
+
+  /// File size matches expected byte count.
+  sizeVerified,
+
+  /// Cryptographic SHA-256 digest matches trustworthy expected digest.
+  sha256Verified,
+}
+
 /// Lifecycle state of an asset download or local acquisition.
 enum AcquisitionLifecycleState {
   notRequested,
@@ -68,7 +80,7 @@ class LocalAssetMetadata {
   final int fileSizeBytes;
   final DateTime lastModified;
   final String? sha256Digest;
-  final bool isIntegrityVerified;
+  final IntegrityVerificationLevel verificationLevel;
 
   const LocalAssetMetadata({
     required this.productId,
@@ -76,10 +88,14 @@ class LocalAssetMetadata {
     required this.fileSizeBytes,
     required this.lastModified,
     this.sha256Digest,
-    this.isIntegrityVerified = false,
+    this.verificationLevel = IntegrityVerificationLevel.notVerified,
   });
+
+  bool get isIntegrityVerified =>
+      verificationLevel == IntegrityVerificationLevel.sizeVerified ||
+      verificationLevel == IntegrityVerificationLevel.sha256Verified;
 
   @override
   String toString() =>
-      'LocalAssetMetadata($productId, path: $localFilePath, size: $fileSizeBytes)';
+      'LocalAssetMetadata($productId, path: $localFilePath, size: $fileSizeBytes, verification: $verificationLevel)';
 }

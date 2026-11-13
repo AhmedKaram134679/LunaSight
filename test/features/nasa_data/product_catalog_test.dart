@@ -3,37 +3,41 @@ import 'package:luna_sight/features/nasa_data/data/datasources/nasa_product_cata
 import 'package:luna_sight/features/nasa_data/domain/entities/nasa_product_definition.dart';
 
 void main() {
-  group('NASA Product Catalog & Metadata Tests', () {
-    test(
-      'ldem_87s_5mpp metadata matches official NASA PGDA publication exactly',
-      () {
-        final product = NasaProductCatalog.ldem87s5mpp;
+  group('NASA Product Catalog & Metadata Provenance Tests', () {
+    test('ldem_87s_5mpp metadata matches official NASA PGDA publication exactly', () {
+      final product = NasaProductCatalog.ldem87s5mpp;
 
-        expect(product.identifier, 'ldem_87s_5mpp');
-        expect(product.title, 'South Pole LOLA DEM Mosaic');
-        expect(product.format, 'GeoTIFF');
-        expect(product.spatialResolution, 5.0);
-        expect(product.spatialResolutionUnit, 'm/pixel');
-        expect(product.horizontalCoordinateUnit, 'meters');
-        expect(product.referenceFrame, 'MOON_ME');
-        expect(product.ephemerisAssociation, 'DE421');
-        expect(product.pixelRegistration, PixelRegistration.pixelRegistered);
-        expect(product.elevationUnit, 'meters');
-        expect(product.publishedSizeBytes, 3465285714);
-        expect(product.publishedSizeDescription, '~3.3 GB');
-        expect(
-          product.officialProductPageUrl.toString(),
-          'https://pgda.gsfc.nasa.gov/products/81',
-        );
-        expect(
-          product.officialAssetUrl.toString(),
-          'https://pgda.gsfc.nasa.gov/data/LOLA_5mpp/87S/ldem_87s_5mpp.tif',
-        );
-        expect(product.citation, contains('Barker et al., 2021'));
-        expect(product.processingNotes, contains('Interpolation is used'));
-        expect(product.processingNotes, contains('cosine taper weight'));
-      },
-    );
+      expect(product.identifier, 'ldem_87s_5mpp');
+      expect(product.title, 'South Pole LOLA DEM Mosaic');
+      expect(product.format, 'GeoTIFF');
+      expect(product.spatialResolution, 5.0);
+      expect(product.spatialResolutionUnit, 'm/pixel');
+      expect(product.horizontalCoordinateUnit, 'meters');
+      expect(product.referenceFrame, 'MOON_ME');
+      expect(product.ephemerisAssociation, 'DE421');
+      expect(product.pixelRegistration, PixelRegistration.pixelRegistered);
+      expect(product.elevationUnit, 'meters');
+
+      // Requirement 5: Provenance separation
+      // Published text states "3.3GB GeoTIFF of surface height Z (meters)"
+      expect(product.publishedSizeDescription, '3.3GB');
+      // Exact byte count is not published in documentation text, so it is null
+      expect(product.publishedSizeBytes, isNull);
+      // HTTP Last-Modified is not treated as an official publication date
+      expect(product.publicationDate, isNull);
+
+      expect(
+        product.officialProductPageUrl.toString(),
+        'https://pgda.gsfc.nasa.gov/products/81',
+      );
+      expect(
+        product.officialAssetUrl.toString(),
+        'https://pgda.gsfc.nasa.gov/data/LOLA_5mpp/87S/ldem_87s_5mpp.tif',
+      );
+      expect(product.citation, contains('Barker et al., 2021'));
+      expect(product.processingNotes, contains('Interpolation is used'));
+      expect(product.processingNotes, contains('cosine taper weight'));
+    });
 
     test('Catalog lookup returns registered product and null for unknown', () {
       expect(NasaProductCatalog.findById('ldem_87s_5mpp'), isNotNull);
@@ -76,11 +80,13 @@ void main() {
         coverageDescription: 'Polar',
         processingNotes: 'None',
         citation: 'N/A',
-        publishedSizeBytes: null, // explicitly unknown
-        publicationDate: null, // explicitly unknown
+        publishedSizeBytes: null,
+        publishedSizeDescription: null,
+        publicationDate: null,
       );
 
       expect(custom.publishedSizeBytes, isNull);
+      expect(custom.publishedSizeDescription, isNull);
       expect(custom.publicationDate, isNull);
       expect(custom.pixelRegistration, PixelRegistration.unknown);
     });
