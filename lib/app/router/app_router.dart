@@ -3,6 +3,7 @@ import 'package:luna_sight/core/constants/app_constants.dart';
 import 'package:luna_sight/core/error/failures.dart';
 import 'package:luna_sight/core/logging/app_logger.dart';
 import 'package:luna_sight/features/home/presentation/pages/home_page.dart';
+import 'package:luna_sight/features/lunar_sites/lunar_sites.dart';
 
 /// Centralized navigation and route generation for LunaSight.
 ///
@@ -13,6 +14,9 @@ class AppRouter {
 
   static const String initialRoute = '/';
   static const String homeRoute = '/';
+  static const String sitesRoute = '/sites';
+  static const String siteDetailsRoute = '/sites/details';
+  static const String customSiteRoute = '/sites/custom';
 
   /// Generates routes dynamically based on incoming [RouteSettings].
   static Route<dynamic> onGenerateRoute(RouteSettings settings) {
@@ -22,6 +26,34 @@ class AppRouter {
       case homeRoute:
         return MaterialPageRoute<void>(
           builder: (_) => const HomePage(),
+          settings: settings,
+        );
+
+      case sitesRoute:
+        return MaterialPageRoute<void>(
+          builder: (_) =>
+              LunarSiteExplorerPage(repository: LocalLunarSiteRepository()),
+          settings: settings,
+        );
+
+      case customSiteRoute:
+        return MaterialPageRoute<void>(
+          builder: (_) =>
+              CustomSiteEntryPage(repository: LocalLunarSiteRepository()),
+          settings: settings,
+        );
+
+      case siteDetailsRoute:
+        final site = settings.arguments;
+        if (site is LunarSite) {
+          return MaterialPageRoute<void>(
+            builder: (_) => LunarSiteDetailsPage(site: site),
+            settings: settings,
+          );
+        }
+        AppLogger.warning('Invalid arguments for route: ${settings.name}');
+        return MaterialPageRoute<void>(
+          builder: (_) => RouteNotFoundPage(routeName: settings.name),
           settings: settings,
         );
 

@@ -108,7 +108,12 @@ class _HomePageState extends State<HomePage> {
                 const SizedBox(height: AppConstants.space16),
                 if (isCompact) ...[
                   for (final module in _modules) ...[
-                    ModuleStatusCard(module: module),
+                    ModuleStatusCard(
+                      module: module,
+                      onTap: module.id == 'lunar_site_explorer'
+                          ? () => Navigator.of(context).pushNamed('/sites')
+                          : null,
+                    ),
                     const SizedBox(height: AppConstants.space12),
                   ],
                 ] else ...[
@@ -130,11 +135,23 @@ class _HomePageState extends State<HomePage> {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(child: ModuleStatusCard(module: modules[i])),
+              Expanded(
+                child: ModuleStatusCard(
+                  module: modules[i],
+                  onTap: modules[i].id == 'lunar_site_explorer'
+                      ? () => Navigator.of(context).pushNamed('/sites')
+                      : null,
+                ),
+              ),
               const SizedBox(width: AppConstants.space16),
               Expanded(
                 child: i + 1 < modules.length
-                    ? ModuleStatusCard(module: modules[i + 1])
+                    ? ModuleStatusCard(
+                        module: modules[i + 1],
+                        onTap: modules[i + 1].id == 'lunar_site_explorer'
+                            ? () => Navigator.of(context).pushNamed('/sites')
+                            : null,
+                      )
                     : const SizedBox.shrink(),
               ),
             ],
