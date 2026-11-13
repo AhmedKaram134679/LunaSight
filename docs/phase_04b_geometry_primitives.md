@@ -17,10 +17,10 @@ Phase 04B establishes the fundamental, implementation-ready mathematical primiti
 This specification defines domain-level value objects and exceptions adhering strictly to Clean Architecture principles:
 - **Included:**
   - Strongly typed physical quantities: `Angle` (radians canonical), `Distance` (meters canonical, non-negative magnitude).
-  - High-precision, unit-neutral `Vector3` primitive with runtime validation, robust scaled normalization (preventing overflow across extreme binary64 exponents), and standard vector algebra.
+  - High-precision, unit-neutral `Vector3` primitive with runtime validation, robust scaled normalization, and standard vector algebra.
   - Strongly typed frame and origin identifiers (`ReferenceFrameId`, `CoordinateOriginId`, `VectorUnit`).
   - Metadata-preserving `FramedVector3` combining `Vector3` with its spatial frame orientation, origin, and component unit.
-  - Dedicated domain-level exception `ScientificComputationException` with stable error codes, descriptive diagnostic message, and deeply validated immutable context.
+  - Dedicated domain-level exception `ScientificComputationException` with stable error codes, descriptive diagnostic message, and validated immutable primitive context.
   - Comprehensive unit and numerical test matrix with operation-specific scale-aware tolerances.
 - **Explicitly Excluded (Deferred to later subphases and phases):**
   - Frame transformations and rotation matrices ($R_{A \to B}$) — deferred to Phase 04C.
@@ -201,15 +201,19 @@ A naive Euclidean magnitude calculation $\|\vec{v}\| = \sqrt{x^2 + y^2 + z^2}$ s
    - The smallest positive **normal** binary64 float is $2^{-1022} \approx 2.2250738585072014 \times 10^{-308}$.
    - The smallest positive **subnormal** binary64 float is $2^{-1074} \approx 4.9406564584124654 \times 10^{-324}$.
    - **Normal vs Subnormal Transition:** When $|x| < \sqrt{2^{-1022}} \approx 1.4916681462400413 \times 10^{-154}$, squaring it yields a value strictly below the normal threshold ($x^2 < 2^{-1022}$). The squared result becomes subnormal, losing significand precision bits progressively.
-   - **Round-to-Nearest Underflow-to-Zero Boundary:**
-     Under IEEE-754 default round-to-nearest (ties-to-even) mode, a positive squared result rounds to zero if it falls strictly below half the minimum subnormal value, i.e., $x^2 < 2^{-1075}$.
-     The square-root magnitude boundary corresponding to this rounding threshold is:
-     $$\sqrt{2^{-1075}} = 2^{-537.5} \approx 1.57172778 \times 10^{-162}$$
-     *Important Precision Note:* The exact boundary behavior near $2^{-537.5}$ depends on the IEEE-754 rounding rule (including ties-to-even behavior on the exact midpoint). Values cannot be assumed to round to zero based solely on a rough approximation without considering the exact rounding mode.
+   - **Round-to-Nearest Midpoint Semantics for Underflow to Zero:**
+     Under IEEE-754 default round-to-nearest, ties-to-even mode:
+     - Half of the minimum positive subnormal value is $2^{-1075} \approx 2.4703282292062327 \times 10^{-324}$.
+     - A positive squared mathematical result strictly below this midpoint ($x^2 < 2^{-1075}$) rounds to $+0.0$.
+     - An exact mathematical result equal to the midpoint ($x^2 == 2^{-1075}$) also rounds to $+0.0$ because zero has an even significand (0) under ties-to-even.
+     - Values above the midpoint ($x^2 > 2^{-1075}$) round to the minimum positive subnormal ($2^{-1074}$) or larger.
+     - The corresponding magnitude boundary for a real number is:
+       $$\sqrt{2^{-1075}} = 2^{-537.5} \approx 1.57172778 \times 10^{-162}$$
+     - *Distinction Between Mathematical Midpoint and Floating-Point Multiplication:* The above decimal value represents the continuous mathematical boundary. In an actual computation, whether the floating-point instruction `x * x` produces zero depends strictly on the exact binary64 operand bits, intermediate precision, and the IEEE-754 rounding mode. Values near this decimal approximation cannot be assumed to behave identically without considering the specific bit representation.
    - If all components round to zero upon squaring, the naive sum evaluates to $+0.0$, causing subsequent normalization to erroneously throw a division-by-zero exception on non-zero vectors.
 
 ##### Algorithm 1: Scaled Magnitude (Blue's Algorithm / Maximum Component Scaling)
-To guarantee numerical stability across the entire binary64 exponent dynamic range without overflow or premature underflow:
+To guarantee numerical stability across the entire binary64 exponent dynamic range:
 1. Determine the maximum absolute component:
    $$m = \max(|x|, \max(|y|, |z|))$$
 2. If $m = 0.0$, return $0.0$.
@@ -220,6 +224,12 @@ To guarantee numerical stability across the entire binary64 exponent dynamic ran
    $$\|\vec{v}\| = m \cdot \sqrt{(x')^2 + (y')^2 + (z')^2}$$
 6. If the final product $m \cdot \sqrt{\dots}$ overflows to infinity (which can occur only if $m$ is within a factor of $\sqrt{3}$ of $\Omega$), throw `ScientificComputationException(code: 'MAGNITUDE_OVERFLOW')`.
 
+**Specific Guarantees of Scaled Magnitude:**
+- Prevents overflow in the intermediate component squares $(x')^2, (y')^2, (z')^2$.
+- Prevents the scaled sum of squares from underflowing to zero for any non-zero vector (since at least one $(x')^2 == 1.0$).
+- Very small scaled component ratios may lose relative precision or underflow to zero.
+- The final magnitude can overflow if the true mathematical magnitude exceeds $\Omega$; this condition is explicitly detected and reported via `MAGNITUDE_OVERFLOW`.
+
 ##### Algorithm 2: Scaled Normalization & Its Precise Guarantees
 To compute the unit vector $\hat{v} = \vec{v} / \|\vec{v}\|$:
 1. Determine $m = \max(|x|, \max(|y|, |z|))$.
@@ -228,11 +238,27 @@ To compute the unit vector $\hat{v} = \vec{v} / \|\vec{v}\|$:
 4. Scale components by $m$:
    $$x' = x / m, \quad y' = y / m, \quad z' = z / m$$
 5. Compute the scaled magnitude $L' = \sqrt{(x')^2 + (y')^2 + (z')^2}$.
-   - **Guaranteed Dominant-Scale Invariant:** Because at least one component has $|x'/y'/z'| == 1.0$, $L' \ge 1.0$. Therefore, $L'$ can never underflow to zero, and the overall normalization algorithm cannot fail due to underflow of the norm.
-   - **Precision Limitations on Disparate Components:** Maximum-component scaling guarantees that the dominant components are normalized without underflow. However, if a vector contains an extremely small component alongside an astronomically larger component (e.g. $x = 10^{300}, y = 1.0$), the ratio $y / m = 10^{-300}$ will underflow upon squaring or component scaling. The algorithm does **not** guarantee preservation of tiny components whose magnitude difference relative to $m$ exceeds the binary64 significand dynamic range ($> 53$ bits or $> 2^{-1022}$). This represents a fundamental limit of floating-point arithmetic, not an algorithm defect.
+   - **Guaranteed Invariant:** Because at least one component has $|x'/y'/z'| == 1.0$, $L' \ge 1.0$. Therefore, $L'$ can never underflow to zero or be subnormal.
+   - **Precision Limitations on Disparate Components:**
+     Consider a vector with disparate components: $x = 10^{300}, y = 1.0$.
+     The scaled ratio $y / m = 1.0 / 10^{300} = 10^{-300}$.
+     This ratio ($10^{-300}$) is fully representable as a normal binary64 value (since $10^{-300} > 2^{-1022} \approx 2.23 \times 10^{-308}$).
+     However, upon squaring in the Euclidean sum, $(10^{-300})^2 = 10^{-600}$, which is far below $2^{-1075}$ and underflows completely to $+0.0$.
+     Furthermore, in the sum $1.0 + (y/m)^2$, even if $(y/m)^2$ did not underflow to zero, adding a term smaller than $2^{-53} \approx 1.11 \times 10^{-16}$ to $1.0$ is swallowed by significand roundoff (machine epsilon).
+     Therefore:
+     1. *Relative precision:* binary64 has 53 bits of significand precision; components whose ratio to $m$ is smaller than $2^{-53}$ cannot influence the dominant norm $L'$.
+     2. *Subnormal range:* ratios between $2^{-1022}$ and $2^{-1074}$ are representable as subnormals with reduced precision.
+     3. *Underflow to zero:* ratios below $2^{-1075}$ round to zero.
+     4. *Squaring underflow:* representable normal ratios can still square to zero.
 6. The normalized components are:
    $$\hat{v} = \begin{pmatrix} x' / L' \\ y' / L' \\ z' / L' \end{pmatrix}$$
 7. Return a new `Vector3` constructed from these components.
+
+**Specific Guarantees of Scaled Normalization:**
+- Prevents the scaled norm $L'$ from becoming zero due to underflow.
+- Avoids overflow caused by directly squaring original large components.
+- Does **not** guarantee preservation of negligible components whose ratio to the dominant component underflows or falls below significand precision.
+- Does **not** promise exact mathematical normalization across the unbounded real-number continuum.
 
 ##### Threshold Policy [APPROVED PROJECT CONTRACT & PRESERVATION]
 - **No Universal Arbitrary Epsilon:** The mathematical primitive `Vector3.normalize()` rejects an **exact zero vector** ($m == 0.0$).
@@ -330,7 +356,7 @@ class FramedVector3 {
 
 ### 3.4 Scientific Failure Contract & Enforceable Context Immutability
 
-To prevent unhandled exceptions, diagnostic state tampering, or exposing raw system stack traces to operators, Phase 04B specifies a dedicated domain exception with deeply validated immutable diagnostic context:
+To prevent unhandled exceptions, diagnostic state tampering, or exposing raw system stack traces to operators, Phase 04B specifies a dedicated domain exception with an immutable scalar whitelist:
 
 ```dart
 @immutable
@@ -367,10 +393,10 @@ class ScientificComputationException implements Exception {
 ```
 
 #### Context Immutability & Diagnostic Value Model:
-- **Supported Value Types:** `String`, `int`, `double`, `bool`, and `null`.
-- **Unsupported Value Rejection:** Any mutable collections (`List`, `Map`, `Set`) or arbitrary domain objects passed into `context` are strictly rejected with an `ArgumentError` during construction.
-- **Defensive Unmodifiable Map:** The resulting map is wrapped in `Map.unmodifiable`.
-- **Immutability Guarantee:** Because all keys are `String` and all values are primitive/immutable types, the diagnostic context is deeply immutable and free of mutation side effects without requiring third-party libraries.
+- **Enforced Scalar Whitelist:** Only `String`, `int`, `double`, `bool`, and `null` are permitted as values in `context`.
+- **Rejection of Mutable Objects:** Any mutable collections (`List`, `Map`, `Set`) or arbitrary domain objects are strictly rejected with an `ArgumentError` during construction.
+- **Unmodifiable Map:** The resulting map is defensively copied and wrapped in `Map.unmodifiable`.
+- **Immutability Scope:** This ensures that all entries in the map are inherently immutable primitives and the map container cannot be altered. *Note:* This is a targeted scalar-whitelist pattern for diagnostic metadata, not a general-purpose deep-freezing engine for arbitrary object graphs.
 
 #### Stable Error Codes:
 - `NON_FINITE_VALUE`: Encountered `NaN`, `+Infinity`, or `-Infinity` in inputs or arguments.
@@ -388,14 +414,15 @@ class ScientificComputationException implements Exception {
 All tests shall reside in `test/features/scientific_geometry/` and execute as deterministic Dart unit tests without Flutter dependencies.
 
 ### 4.1 Operation-Specific Scale-Aware Tolerances
-Floating-point comparisons must never use exact equality (`==`), except when checking for exact zeros or identical binary representations. Tolerances are mathematically justified by operation:
+Floating-point comparisons must never use exact equality (`==`), except when checking for exact zeros or identical binary representations. Tolerances are scale-aware test acceptance values:
 - **Angle Conversion Tolerance ($\epsilon_\theta$):**
-  - For radians $\leftrightarrow$ degrees conversions: $\epsilon_\theta = 1.0 \times 10^{-12}\text{ rad}$ (well above binary64 machine epsilon $\epsilon_{\text{mach}} \approx 2.22 \times 10^{-16}$, accommodating single multiplication roundoff by $\pi / 180.0$).
+  - Proposed test tolerance: $\epsilon_\theta = 1.0 \times 10^{-12}\text{ rad}$ for degrees $\leftrightarrow$ radians conversions.
 - **Normalized Vector Unit Magnitude Tolerance ($\epsilon_{\text{norm}}$):**
-  - For validating $\|\hat{v}\| == 1.0$: $\epsilon_{\text{norm}} = 1.0 \times 10^{-15}$ (dimensionless, accommodating 3 squarings, 2 additions, and 1 square root in binary64 arithmetic).
-- **Scaled Distance Tolerance ($\epsilon_d$):**
-  - For meters $\leftrightarrow$ kilometers conversions: Exact IEEE representation when dividing/multiplying powers of 10, or bounded by $1.0 \times 10^{-12}\text{ m}$ for general distance arithmetic.
-- *Status:* All tolerances are **PROPOSED IMPLEMENTATION TOLERANCES** subject to confirmation during Phase 04B test suite implementation.
+  - Proposed test tolerance: $\epsilon_{\text{norm}} = 1.0 \times 10^{-15}$ (dimensionless) for verifying $\|\hat{v}\| \approx 1.0$.
+  - *Verification Requirement:* This tolerance is a **proposed test acceptance value**, not a universal mathematical bound. It must be validated during Phase 04B implementation against analytically known unit vectors, multiple magnitude scales ($10^{-200}$ to $10^{200}$), mixed-exponent components, and independent high-precision expected values.
+- **Distance Scaling Tolerance ($\epsilon_d$):**
+  - Proposed test tolerance: $\epsilon_d = 1.0 \times 10^{-12}\text{ m}$ for general distance arithmetic, or exact IEEE representation where applicable.
+- *Status:* All tolerances are **PROPOSED IMPLEMENTATION TOLERANCES** and are not approved as permanent scientific constants until implementation tests and independent verification justify their adoption.
 
 ### 4.2 Test Matrix (Strictly Restricted to Phase 04B Primitives)
 
@@ -524,7 +551,12 @@ This specification strictly honors and preserves all scientific conclusions and 
 Phase 04B shall be considered complete when:
 1. All domain primitives and value objects specified herein are implemented in `lib/features/scientific_geometry/domain/`.
 2. All non-finite inputs, negative distances, zero-vector normalizations, arithmetic overflows, and division-by-zero operations throw `ScientificComputationException`.
-3. Scaled magnitude and normalization algorithms are proven to handle extreme exponents without underflow or overflow.
+3. The scaled magnitude and scaled normalization algorithms satisfy the following verifiable criteria:
+   - No intermediate squaring overflow occurs in the scaled sum-of-squares calculation for any finite vector.
+   - The scaled sum of squares cannot underflow to zero for any non-zero finite input vector.
+   - Final magnitude overflow is correctly detected and reported via `MAGNITUDE_OVERFLOW` when the true magnitude exceeds the binary64 representable range.
+   - Behavior when negligible component ratios or their squares underflow is fully documented and verified against test cases.
+   - Representative large, small, and mixed-exponent vectors normalize correctly within the explicitly proposed test tolerances.
 4. Automated unit test suite under `test/features/scientific_geometry/` executes with 100% pass rate.
 5. `flutter analyze` reports zero errors, warnings, or lints.
 6. The project roadmap in `lib/features/home/data/repositories/local_system_module_repository.dart` continues to show **Phase 04 as planned** (`ModuleStatus.planned`) until all Phase 04 subphases are completed and approved.
