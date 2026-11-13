@@ -25,7 +25,7 @@ void main() {
     }
   });
 
-  group('NasaHttpService Resume, Retry & Timeout Tests', () {
+  group('NasaHttpService Range Completeness & Retry Tests', () {
     test(
       'inspectRemoteResource parses Content-Length and Accept-Ranges properly',
       () async {
@@ -90,7 +90,6 @@ void main() {
       });
 
       final service = NasaHttpService(client: mockClient, maxRetries: 3);
-
       final info = await service.streamDownloadToFile(
         uri: validUri,
         destinationFile: targetFile,
@@ -101,11 +100,168 @@ void main() {
       expect(info.totalBytesWritten, 1000);
       expect(await targetFile.length(), 1000);
 
-      // Verify exact byte continuity without duplicates
       final finalBytes = await targetFile.readAsBytes();
       for (int i = 0; i < 1000; i++) {
         expect(finalBytes[i], i % 256);
       }
+    });
+
+    test(
+      'Unknown total (*) with complete segment and no Content-Length succeeds',
+      () async {
+        final payload = List.generate(100, (i) => i % 256);
+        final mockClient = http_testing.MockClient.streaming((
+          request,
+          bodyStream,
+        ) async {
+          return http.StreamedResponse(
+            Stream.value(payload),
+            206,
+            headers: {
+              'content-range': 'bytes 0-99/*',
+              // No Content-Length
+            },
+          );
+        });
+
+        final service = NasaHttpService(client: mockClient);
+        final info = await service.streamDownloadToFile(
+          uri: validUri,
+          destinationFile: targetFile,
+        );
+
+        expect(info.totalBytesWritten, 100);
+        expect(await targetFile.length(), 100);
+      },
+    );
+
+    test('Unknown total (*) with truncated segment and no Content-Length fails segment validation', () async {
+      // Range declares 0-99 (100 bytes), but stream delivers only 40 bytes
+      final truncatedPayload = List.generate(40, (i) => i % 256);
+      final mockClient = http_testing.MockClient.streaming((
+        request,
+        bodyStream,
+      ) async {
+        return http.StreamedResponse(
+          Stream.value(truncatedPayload),
+          206,
+          headers: {'content-range': 'bytes 0-99/*'},
+        );
+      });
+
+      final service = NasaHttpService(client: mockClient, maxRetries: 1);
+
+      await expectLater(
+        () => service.streamDownloadToFile(
+          uri: validUri,
+          destinationFile: targetFile,
+        ),
+        throwsA(isA<IntegrityValidationFailure>()),
+      );
+    });
+
+    test('Numeric total with end >= total fails validation', () async {
+      final mockClient = http_testing.MockClient.streaming((
+        request,
+        bodyStream,
+      ) async {
+        return http.StreamedResponse(
+          Stream.value([1, 2, 3]),
+          206,
+          headers: {
+            'content-range': 'bytes 0-100/100', // end offset 100 >= total 100
+          },
+        );
+      });
+
+      final service = NasaHttpService(client: mockClient, maxRetries: 1);
+
+      await expectLater(
+        () => service.streamDownloadToFile(
+          uri: validUri,
+          destinationFile: targetFile,
+        ),
+        throwsA(isA<IntegrityValidationFailure>()),
+      );
+    });
+
+    test(
+      'Numeric total with valid partial segment succeeds and updates file',
+      () async {
+        final payload = List.generate(50, (i) => i);
+        final mockClient = http_testing.MockClient.streaming((
+          request,
+          bodyStream,
+        ) async {
+          return http.StreamedResponse(
+            Stream.value(payload),
+            206,
+            headers: {
+              'content-range': 'bytes 0-49/200',
+              'content-length': '50',
+            },
+          );
+        });
+
+        final service = NasaHttpService(client: mockClient);
+        final info = await service.streamDownloadToFile(
+          uri: validUri,
+          destinationFile: targetFile,
+        );
+
+        expect(info.totalBytesWritten, 50);
+        expect(await targetFile.length(), 50);
+      },
+    );
+
+    test('Segment body shorter than its declared Content-Range span throws IntegrityValidationFailure', () async {
+      // Declares bytes 0-49 (50 bytes), sends 25 bytes
+      final shortPayload = List.generate(25, (i) => i);
+      final mockClient = http_testing.MockClient.streaming((
+        request,
+        bodyStream,
+      ) async {
+        return http.StreamedResponse(
+          Stream.value(shortPayload),
+          206,
+          headers: {'content-range': 'bytes 0-49/100', 'content-length': '50'},
+        );
+      });
+
+      final service = NasaHttpService(client: mockClient, maxRetries: 1);
+
+      await expectLater(
+        () => service.streamDownloadToFile(
+          uri: validUri,
+          destinationFile: targetFile,
+        ),
+        throwsA(isA<IntegrityValidationFailure>()),
+      );
+    });
+
+    test('Segment body longer than its declared Content-Range span throws IntegrityValidationFailure', () async {
+      // Declares bytes 0-49 (50 bytes), sends 60 bytes
+      final longPayload = List.generate(60, (i) => i);
+      final mockClient = http_testing.MockClient.streaming((
+        request,
+        bodyStream,
+      ) async {
+        return http.StreamedResponse(
+          Stream.value(longPayload),
+          206,
+          headers: {'content-range': 'bytes 0-49/100', 'content-length': '50'},
+        );
+      });
+
+      final service = NasaHttpService(client: mockClient, maxRetries: 1);
+
+      await expectLater(
+        () => service.streamDownloadToFile(
+          uri: validUri,
+          destinationFile: targetFile,
+        ),
+        throwsA(isA<IntegrityValidationFailure>()),
+      );
     });
 
     test(
@@ -118,7 +274,7 @@ void main() {
             [1, 2, 3],
             206,
             headers: {
-              'content-range': 'bytes 0-202/1000', // Server returned range starting at 0 instead of 200
+              'content-range': 'bytes 0-202/1000',
               'content-length': '3',
             },
           );
@@ -135,7 +291,6 @@ void main() {
           throwsA(isA<NasaNetworkFailure>()),
         );
 
-        // Verify local file was reset
         expect(await targetFile.exists(), isFalse);
       },
     );
@@ -145,10 +300,7 @@ void main() {
         return http.Response.bytes(
           [1, 2, 3],
           206,
-          headers: {
-            'content-range': 'bytes 50-20/1000', // Malformed end < start
-            'content-length': '3',
-          },
+          headers: {'content-range': 'bytes 50-20/1000', 'content-length': '3'},
         );
       });
 
@@ -169,10 +321,7 @@ void main() {
         return http.Response.bytes(
           [1, 2, 3],
           206,
-          headers: {
-            'content-range': 'bytes 0-2/5000', // Expected total was 1000
-            'content-length': '3',
-          },
+          headers: {'content-range': 'bytes 0-2/5000', 'content-length': '3'},
         );
       });
 
@@ -188,31 +337,7 @@ void main() {
       );
     });
 
-    test('Rejects Content-Range with inconsistent Content-Length', () async {
-      final mockClient = http_testing.MockClient((request) async {
-        return http.Response.bytes(
-          [1, 2, 3],
-          206,
-          headers: {
-            'content-range': 'bytes 0-99/100', // Declares span of 100 bytes
-            'content-length': '50', // Inconsistent: declares 50
-          },
-        );
-      });
-
-      final service = NasaHttpService(client: mockClient, maxRetries: 1);
-
-      await expectLater(
-        () => service.streamDownloadToFile(
-          uri: validUri,
-          destinationFile: targetFile,
-        ),
-        throwsA(isA<NasaNetworkFailure>()),
-      );
-    });
-
     test('Recovers from HTTP 416 Range Not Satisfiable by resetting file and retrying clean download', () async {
-      // Existing file has 500 stale bytes
       await targetFile.writeAsBytes(List.generate(500, (i) => i));
 
       int attempts = 0;
@@ -222,7 +347,6 @@ void main() {
           expect(request.headers['Range'], 'bytes=500-');
           return http.Response('Requested range not satisfiable', 416);
         } else {
-          // Attempt 2: After 416, targetFile was deleted, so clean GET without Range
           expect(request.headers.containsKey('Range'), isFalse);
           return http.Response.bytes(
             [10, 20, 30],
@@ -277,7 +401,6 @@ void main() {
       ) async {
         final controller = StreamController<List<int>>();
         controller.add([1, 2, 3]);
-        // Do not complete or send further data to simulate stalled stream
         return http.StreamedResponse(controller.stream, 200);
       });
 
@@ -331,7 +454,7 @@ void main() {
           throwsA(isA<AcquisitionCancelledFailure>()),
         );
 
-        expect(attempts, 1); // Cancellation was not retried
+        expect(attempts, 1);
       },
     );
   });

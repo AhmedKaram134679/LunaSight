@@ -22,7 +22,7 @@ void main() {
     }
   });
 
-  group('LocalDataStorageService Path Traversal & Atomicity Tests', () {
+  group('LocalDataStorageService Path Traversal & Crash Recovery Tests', () {
     test('Rejects path traversal in product ID and relative paths', () {
       expect(
         () => storage.getTempFile('../escape'),
@@ -42,7 +42,6 @@ void main() {
       final metaDir = Directory('${testDir.path}/meta');
       final corruptedMetaFile = File('${metaDir.path}/product_a.json');
 
-      // Record claims to belong to product_b
       final record = LocalAssetRecord(
         productId: 'product_b',
         relativeFilePath: 'product_a.tif',
@@ -51,7 +50,6 @@ void main() {
       );
       await corruptedMetaFile.writeAsString(record.serialize());
 
-      // Attempting to retrieve product_a should detect mismatch and purge metadata
       final verified = await storage.getVerifiedAsset('product_a');
       expect(verified, isNull);
       expect(await corruptedMetaFile.exists(), isFalse);
@@ -104,53 +102,129 @@ void main() {
       },
     );
 
+    // Crash Recovery Tests simulating interruption at transaction boundaries
+
+    test('Interruption simulation: First installation interrupted before metadata commit', () async {
+      final completedDir = Directory('${testDir.path}/completed');
+      final uncommittedAsset = File(
+        '${completedDir.path}/first_install_gen123.tif',
+      );
+      await uncommittedAsset.writeAsBytes([1, 2, 3, 4]);
+
+      // No metadata committed yet
+      await storage.recoverStorageState();
+
+      // Asset was unreferenced by any metadata record, so it must be cleaned up
+      expect(await uncommittedAsset.exists(), isFalse);
+      expect(await storage.getVerifiedAsset('first_install'), isNull);
+    });
+
+    test('Interruption simulation: Staged metadata written but interrupted before rename', () async {
+      final completedDir = Directory('${testDir.path}/completed');
+      final metaDir = Directory('${testDir.path}/meta');
+
+      final asset = File('${completedDir.path}/interrupted_gen100.tif');
+      await asset.writeAsBytes([10, 20, 30]);
+
+      final stagedMeta = File('${metaDir.path}/interrupted.staged.json');
+      final record = LocalAssetRecord(
+        productId: 'interrupted',
+        relativeFilePath: 'interrupted_gen100.tif',
+        fileSizeBytes: 3,
+        acquiredAt: DateTime.now().toUtc(),
+      );
+      await stagedMeta.writeAsString(record.serialize());
+
+      // Recovery detects complete staged metadata and valid matching asset, completing the commit
+      await storage.recoverStorageState();
+
+      final verified = await storage.getVerifiedAsset('interrupted');
+      expect(verified, isNotNull);
+      expect(verified!.fileSizeBytes, 3);
+      expect(await File(verified.localFilePath).readAsBytes(), [10, 20, 30]);
+    });
+
+    test('Interruption simulation: Replacement interrupted before new metadata committed preserves old generation', () async {
+      final completedDir = Directory('${testDir.path}/completed');
+      final metaDir = Directory('${testDir.path}/meta');
+
+      // Generation 1 (fully committed)
+      final oldAsset = File('${completedDir.path}/prod_gen1.tif');
+      await oldAsset.writeAsBytes([1, 1, 1]);
+      final activeMeta = File('${metaDir.path}/prod.json');
+      final oldRecord = LocalAssetRecord(
+        productId: 'prod',
+        relativeFilePath: 'prod_gen1.tif',
+        fileSizeBytes: 3,
+        acquiredAt: DateTime.now().toUtc(),
+      );
+      await activeMeta.writeAsString(oldRecord.serialize());
+
+      // Generation 2 staged but interrupted
+      final newAsset = File('${completedDir.path}/prod_gen2.tif');
+      await newAsset.writeAsBytes([2, 2, 2, 2, 2]);
+
+      await storage.recoverStorageState();
+
+      // Old generation must be intact and verified
+      final verified = await storage.getVerifiedAsset('prod');
+      expect(verified, isNotNull);
+      expect(verified!.fileSizeBytes, 3);
+      expect(await File(verified.localFilePath).readAsBytes(), [1, 1, 1]);
+
+      // Unreferenced generation 2 cleaned up
+      expect(await newAsset.exists(), isFalse);
+    });
+
+    test('Interruption simulation: Legacy backup recovery when backup is the only valid asset', () async {
+      final completedDir = Directory('${testDir.path}/completed');
+      final metaDir = Directory('${testDir.path}/meta');
+
+      // Metadata expects prod_legacy.tif of size 4
+      final activeMeta = File('${metaDir.path}/prod_legacy.json');
+      final record = LocalAssetRecord(
+        productId: 'prod_legacy',
+        relativeFilePath: 'prod_legacy.tif',
+        fileSizeBytes: 4,
+        acquiredAt: DateTime.now().toUtc(),
+      );
+      await activeMeta.writeAsString(record.serialize());
+
+      // Only prod_legacy.bak exists of size 4
+      final bakFile = File('${completedDir.path}/prod_legacy.bak');
+      await bakFile.writeAsBytes([9, 9, 9, 9]);
+
+      await storage.recoverStorageState();
+
+      // Asset was restored from backup and is now verified
+      final verified = await storage.getVerifiedAsset('prod_legacy');
+      expect(verified, isNotNull);
+      expect(verified!.fileSizeBytes, 4);
+      expect(await File(verified.localFilePath).readAsBytes(), [9, 9, 9, 9]);
+    });
+
     test(
-      'Commit preserves existing valid asset if replacement fails validation',
+      'Recovery protocol is idempotent across repeated invocations',
       () async {
-        // 1. Commit initial valid asset
-        final initialTemp = storage.getTempFile('safe_product');
-        await initialTemp.writeAsBytes([1, 2, 3, 4]);
+        final tempFile = storage.getTempFile('idempotent_test');
+        await tempFile.writeAsBytes([5, 6, 7]);
         await storage.commitAsset(
-          productId: 'safe_product',
-          tempFile: initialTemp,
+          productId: 'idempotent_test',
+          tempFile: tempFile,
           fileExtension: 'tif',
-          expectedSize: 4,
+          expectedSize: 3,
         );
 
-        final existingAsset = await storage.getVerifiedAsset('safe_product');
-        expect(existingAsset, isNotNull);
-        expect(existingAsset!.fileSizeBytes, 4);
+        // Run recovery multiple times
+        await storage.recoverStorageState();
+        await storage.recoverStorageState();
+        await storage.recoverStorageState();
 
-        // 2. Try committing replacement with bad size
-        final badTemp = storage.getTempFile('safe_product');
-        await badTemp.writeAsBytes([1, 2]); // 2 bytes instead of expected 10
-
-        await expectLater(
-          () => storage.commitAsset(
-            productId: 'safe_product',
-            tempFile: badTemp,
-            fileExtension: 'tif',
-            expectedSize: 10,
-          ),
-          throwsA(isA<IntegrityValidationFailure>()),
-        );
-
-        // Verify original asset was preserved and not destroyed
-        final preservedAsset = await storage.getVerifiedAsset('safe_product');
-        expect(preservedAsset, isNotNull);
-        expect(preservedAsset!.fileSizeBytes, 4);
+        final verified = await storage.getVerifiedAsset('idempotent_test');
+        expect(verified, isNotNull);
+        expect(verified!.fileSizeBytes, 3);
+        expect(await File(verified.localFilePath).readAsBytes(), [5, 6, 7]);
       },
     );
-
-    test('Orphaned staged files are recovered on initialize', () async {
-      final completedDir = Directory('${testDir.path}/completed');
-      final orphanedStagedFile = File('${completedDir.path}/orphan.staged.tif');
-      await orphanedStagedFile.writeAsString('orphaned');
-      expect(await orphanedStagedFile.exists(), isTrue);
-
-      // Calling initialize cleans up orphaned files
-      await storage.initialize();
-      expect(await orphanedStagedFile.exists(), isFalse);
-    });
   });
 }

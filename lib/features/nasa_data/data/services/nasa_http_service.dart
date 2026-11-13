@@ -61,7 +61,8 @@ class NasaHttpService {
   /// Downloads an official NASA asset, supporting resume if ranges are supported.
   ///
   /// Recalculates file length on every attempt, validates Content-Range, Content-Length,
-  /// respects stream idle timeouts, and gracefully recovers from HTTP 416 or 200 responses.
+  /// validates actual segment length received, respects stream idle timeouts, and
+  /// gracefully recovers from HTTP 416 or 200 responses.
   Future<DownloadCompletionInfo> streamDownloadToFile({
     required Uri uri,
     required File destinationFile,
@@ -139,9 +140,11 @@ class NasaHttpService {
       IOSink sink;
       int bytesReceivedSoFar = 0;
       int? effectiveTotalBytes;
+      int? expectedSegmentLength;
+      int segmentBytesReceived = 0;
 
       if (statusCode == 206) {
-        // Requirement 3 & 4: Validate all Content-Range components
+        // Complete Content-Range validation
         final contentRangeHeader = headers['content-range'];
         final rangeInfo = _parseContentRange(contentRangeHeader);
 
@@ -167,7 +170,17 @@ class NasaHttpService {
           );
         }
 
-        // Total resource size check
+        // When total is numeric, require end < total
+        if (rangeInfo.total != null && rangeInfo.end >= rangeInfo.total!) {
+          throw IntegrityValidationFailure(
+            message:
+                'Invalid Content-Range: end offset (${rangeInfo.end}) must be less than total (${rangeInfo.total}).',
+            expectedSize: rangeInfo.total,
+            actualSize: rangeInfo.end,
+          );
+        }
+
+        // When total is numeric and expectedTotalBytes is known, require equality
         if (rangeInfo.total != null &&
             expectedTotalBytes != null &&
             rangeInfo.total != expectedTotalBytes) {
@@ -179,12 +192,14 @@ class NasaHttpService {
           );
         }
 
+        expectedSegmentLength = (rangeInfo.end - rangeInfo.start) + 1;
+
         // Content-Length consistency with range length
         final lengthHeader = headers['content-length'];
         if (lengthHeader != null) {
           final declaredLength = int.tryParse(lengthHeader);
-          final expectedRangeLength = (rangeInfo.end - rangeInfo.start) + 1;
-          if (declaredLength != null && declaredLength != expectedRangeLength) {
+          if (declaredLength != null &&
+              declaredLength != expectedSegmentLength) {
             throw const NasaNetworkFailure(
               message:
                   'Content-Length does not match Content-Range declared span.',
@@ -193,7 +208,7 @@ class NasaHttpService {
           }
         }
 
-        effectiveTotalBytes = rangeInfo.total ?? expectedTotalBytes;
+        effectiveTotalBytes = expectedTotalBytes;
         bytesReceivedSoFar = existingBytes;
         sink = destinationFile.openWrite(mode: FileMode.append);
       } else if (statusCode == 200) {
@@ -210,6 +225,7 @@ class NasaHttpService {
         effectiveTotalBytes = lengthHeader != null
             ? int.tryParse(lengthHeader)
             : expectedTotalBytes;
+        expectedSegmentLength = effectiveTotalBytes;
         bytesReceivedSoFar = 0;
         sink = destinationFile.openWrite(mode: FileMode.write);
       } else {
@@ -259,6 +275,7 @@ class NasaHttpService {
             }
 
             sink.add(chunk);
+            segmentBytesReceived += chunk.length;
             bytesReceivedSoFar += chunk.length;
             onProgress?.call(bytesReceivedSoFar, effectiveTotalBytes);
           },
@@ -302,12 +319,23 @@ class NasaHttpService {
         await sink.close();
       }
 
+      // Validate segment length
+      if (expectedSegmentLength != null &&
+          segmentBytesReceived != expectedSegmentLength) {
+        throw IntegrityValidationFailure(
+          message:
+              'Segment length mismatch. Expected $expectedSegmentLength bytes in response segment, received $segmentBytesReceived bytes.',
+          expectedSize: expectedSegmentLength,
+          actualSize: segmentBytesReceived,
+        );
+      }
+
       // Check Content-Length integrity if expected total was supplied
       if (effectiveTotalBytes != null &&
           bytesReceivedSoFar != effectiveTotalBytes) {
         throw IntegrityValidationFailure(
           message:
-              'Transfer interrupted. Expected $effectiveTotalBytes bytes, received $bytesReceivedSoFar bytes.',
+              'Transfer interrupted. Expected $effectiveTotalBytes total bytes, accumulated $bytesReceivedSoFar bytes.',
           expectedSize: effectiveTotalBytes,
           actualSize: bytesReceivedSoFar,
         );

@@ -7,7 +7,7 @@ import 'package:luna_sight/features/nasa_data/data/models/local_asset_record.dar
 import 'package:luna_sight/features/nasa_data/domain/entities/acquisition_status.dart';
 import 'package:luna_sight/features/nasa_data/domain/failures/nasa_data_failures.dart';
 
-/// Manages local disk storage, atomic file movement, cache indexes, and integrity.
+/// Manages local disk storage, generation-tracked atomic commits, crash recovery, and integrity.
 class LocalDataStorageService {
   final Directory baseStorageDirectory;
 
@@ -21,12 +21,12 @@ class LocalDataStorageService {
   Directory get _metaDir =>
       Directory('${baseStorageDirectory.path}${Platform.pathSeparator}meta');
 
-  /// Ensures storage directories exist and cleans any orphaned temporary files.
+  /// Ensures storage directories exist and runs crash-recovery.
   Future<void> initialize() async {
     await _completedDir.create(recursive: true);
     await _tempDir.create(recursive: true);
     await _metaDir.create(recursive: true);
-    await recoverOrphanedStagedFiles();
+    await recoverStorageState();
   }
 
   /// Path to a temporary file during transfer.
@@ -77,7 +77,6 @@ class LocalDataStorageService {
       '${_completedDir.path}${Platform.pathSeparator}$relativeFilePath',
     );
 
-    // Canonicalize paths and ensure target is inside _completedDir
     final completedCanonical = _completedDir.resolveSymbolicLinksSync();
     String fileCanonical;
     try {
@@ -163,10 +162,16 @@ class LocalDataStorageService {
     }
   }
 
-  /// Safely and atomically commits a completed temp file into the completed cache directory.
+  /// Crash-safe, generation-tracked commit of a completed temp file into storage.
   ///
-  /// Never destroys a previous valid asset before validating the new asset.
-  /// Writes metadata to a staged temp file before atomically completing.
+  /// Protocol:
+  /// 1. Validate tempFile existence, expected size, and expected SHA-256.
+  /// 2. Generate a unique generation ID (timestamp).
+  /// 3. Move tempFile to generation-tagged asset: `<productId>_gen<timestamp>.<ext>`.
+  /// 4. Write staged metadata `<productId>.staged.json` pointing to the generation asset.
+  /// 5. Atomically commit metadata by renaming `<productId>.staged.json` -> `<productId>.json`.
+  ///    (The authoritative commit point is the metadata file).
+  /// 6. Clean up previous generation assets that are no longer referenced.
   Future<LocalAssetMetadata> commitAsset({
     required String productId,
     required File tempFile,
@@ -214,24 +219,22 @@ class LocalDataStorageService {
       verificationLevel = IntegrityVerificationLevel.sizeVerified;
     }
 
-    final finalTargetFile = getCompletedFile(productId, fileExtension);
-    final relativeFileName = finalTargetFile.uri.pathSegments.last;
-
-    // Stage 1: Stage the new asset file in completed directory as .staged
-    final stagedAssetFile = File(
-      '${_completedDir.path}${Platform.pathSeparator}$productId.staged$fileExtension',
+    final ext = fileExtension.startsWith('.')
+        ? fileExtension
+        : '.$fileExtension';
+    final genTimestamp = DateTime.now().toUtc().microsecondsSinceEpoch;
+    final genFileName = '${productId}_gen$genTimestamp$ext';
+    final genAssetFile = File(
+      '${_completedDir.path}${Platform.pathSeparator}$genFileName',
     );
-    if (await stagedAssetFile.exists()) {
-      await stagedAssetFile.delete();
-    }
 
-    // Move tempFile to staged file
-    await tempFile.rename(stagedAssetFile.path);
+    // Step 1: Move temp file to generation asset file
+    await tempFile.rename(genAssetFile.path);
 
-    // Stage 2: Stage metadata file
+    // Step 2: Prepare new metadata record pointing to this generation file
     final record = LocalAssetRecord(
       productId: productId,
-      relativeFilePath: relativeFileName,
+      relativeFilePath: genFileName,
       fileSizeBytes: actualSize,
       acquiredAt: DateTime.now().toUtc(),
       sha256Digest: actualSha256,
@@ -243,88 +246,191 @@ class LocalDataStorageService {
     final stagedMetaFile = File(
       '${_metaDir.path}${Platform.pathSeparator}$productId.staged.json',
     );
-    await stagedMetaFile.writeAsString(record.serialize(), flush: true);
-
-    // Stage 3: Atomic swap of file and metadata
-    // If an existing file exists, keep it as backup until replacement succeeds
-    File? backupFile;
-    if (await finalTargetFile.exists()) {
-      backupFile = File(
-        '${_completedDir.path}${Platform.pathSeparator}$productId.bak',
-      );
-      if (await backupFile.exists()) {
-        await backupFile.delete();
-      }
-      await finalTargetFile.rename(backupFile.path);
-    }
+    final finalMetaFile = _getMetaFile(productId);
 
     try {
-      // Rename staged asset to final target file
-      await stagedAssetFile.rename(finalTargetFile.path);
+      // Step 3: Write staged metadata file and flush
+      await stagedMetaFile.writeAsString(record.serialize(), flush: true);
 
-      // Rename staged metadata to final metadata file
-      final finalMetaFile = _getMetaFile(productId);
+      // Step 4: Authoritative atomic commit: rename staged metadata over final metadata
       await stagedMetaFile.rename(finalMetaFile.path);
 
-      // Success: clean up backup
-      if (backupFile != null && await backupFile.exists()) {
-        await backupFile.delete();
-      }
+      // Step 5: Post-commit cleanup: remove any older generation files or legacy unreferenced files for this product
+      await _cleanUnreferencedGenerations(
+        productId,
+        activeRelativeFile: genFileName,
+      );
 
-      return record.toEntity(finalTargetFile.path);
+      return record.toEntity(genAssetFile.path);
     } catch (e, stack) {
       AppLogger.error(
-        'Failed atomic swap for $productId: $e. Restoring backup if available.',
+        'Failed committing metadata for $productId: $e',
         error: e,
         stackTrace: stack,
       );
 
-      // Rollback: restore backup
-      if (backupFile != null && await backupFile.exists()) {
-        if (await finalTargetFile.exists()) {
-          await finalTargetFile.delete();
-        }
-        await backupFile.rename(finalTargetFile.path);
-      }
-
-      // Cleanup staged files
-      if (await stagedAssetFile.exists()) {
-        await stagedAssetFile.delete();
+      // Clean up the newly created generation file so it doesn't leak
+      if (await genAssetFile.exists()) {
+        await genAssetFile.delete();
       }
       if (await stagedMetaFile.exists()) {
         await stagedMetaFile.delete();
       }
 
       throw NasaStorageFailure(
-        message: 'Atomic commit failed for $productId: $e',
+        message: 'Commit failed for $productId: $e',
         cause: e,
         stackTrace: stack,
       );
     }
   }
 
-  /// Recovers any leftover staged files from interrupted operations.
-  Future<void> recoverOrphanedStagedFiles() async {
+  /// Crash-safe idempotent recovery protocol.
+  ///
+  /// Examines existing metadata records in `meta/` as the single authoritative commit pointer.
+  /// Resolves any legacy .bak files, recovers any complete staged commits,
+  /// validates referenced assets, and only purges unreferenced orphaned files.
+  Future<void> recoverStorageState() async {
     try {
+      // 1. Process meta files
+      if (!await _metaDir.exists()) return;
+
+      final metaFiles = await _metaDir
+          .list()
+          .where((e) => e is File)
+          .cast<File>()
+          .toList();
+      final referencedCompletedFiles = <String>{};
+
+      for (final metaFile in metaFiles) {
+        final filename = metaFile.uri.pathSegments.last;
+
+        // Handle interrupted staged metadata commit
+        if (filename.endsWith('.staged.json')) {
+          final prodId = filename.substring(
+            0,
+            filename.length - '.staged.json'.length,
+          );
+          final finalMeta = _getMetaFile(prodId);
+
+          // If final metadata already exists, staged metadata is redundant
+          if (await finalMeta.exists()) {
+            await metaFile.delete();
+          } else {
+            // Interrupted right before rename: verify if staged metadata points to valid asset
+            final jsonStr = await metaFile.readAsString();
+            final record = LocalAssetRecord.tryDeserialize(jsonStr);
+            if (record != null) {
+              final assetFile = File(
+                '${_completedDir.path}${Platform.pathSeparator}${record.relativeFilePath}',
+              );
+              if (await assetFile.exists() &&
+                  (await assetFile.length()) == record.fileSizeBytes) {
+                // Complete the commit
+                await metaFile.rename(finalMeta.path);
+                referencedCompletedFiles.add(record.relativeFilePath);
+                continue;
+              }
+            }
+            await metaFile.delete();
+          }
+          continue;
+        }
+
+        if (filename.endsWith('.json')) {
+          final prodId = filename.substring(
+            0,
+            filename.length - '.json'.length,
+          );
+          try {
+            final jsonStr = await metaFile.readAsString();
+            final record = LocalAssetRecord.tryDeserialize(jsonStr);
+            if (record != null && record.productId == prodId) {
+              final assetFile = File(
+                '${_completedDir.path}${Platform.pathSeparator}${record.relativeFilePath}',
+              );
+              if (await assetFile.exists() &&
+                  (await assetFile.length()) == record.fileSizeBytes) {
+                referencedCompletedFiles.add(record.relativeFilePath);
+                continue;
+              } else {
+                // File missing or size corrupt; check if a legacy .bak exists for this product that matches
+                final legacyBak = File(
+                  '${_completedDir.path}${Platform.pathSeparator}$prodId.bak',
+                );
+                if (await legacyBak.exists() &&
+                    (await legacyBak.length()) == record.fileSizeBytes) {
+                  // Restore from legacy bak
+                  await legacyBak.rename(assetFile.path);
+                  referencedCompletedFiles.add(record.relativeFilePath);
+                  continue;
+                }
+              }
+            }
+          } catch (_) {}
+        }
+      }
+
+      // 2. Scan completed directory to clean only unreferenced staged or orphaned files
       if (await _completedDir.exists()) {
         await for (final entity in _completedDir.list()) {
-          if (entity is File &&
-              (entity.path.endsWith('.staged') ||
-                  entity.path.contains('.staged.') ||
-                  entity.path.endsWith('.bak'))) {
-            await entity.delete();
+          if (entity is File) {
+            final name = entity.uri.pathSegments.last;
+            // If referenced by a valid committed metadata record, never delete!
+            if (referencedCompletedFiles.contains(name)) {
+              continue;
+            }
+
+            // Check if this is an unreferenced generation or legacy .bak or .staged file
+            final isUnreferencedStaged =
+                name.contains('.staged') || name.contains('.staged.');
+            final isGenerationFile = name.contains('_gen');
+            final isLegacyBak = name.endsWith('.bak');
+
+            // Before deleting a legacy .bak, ensure there is no metadata file that needed it
+            if (isLegacyBak) {
+              final prodId = name.substring(0, name.length - '.bak'.length);
+              final meta = _getMetaFile(prodId);
+              if (await meta.exists()) {
+                // Keep it if metadata exists
+                continue;
+              }
+            }
+
+            if (isUnreferencedStaged || isGenerationFile || isLegacyBak) {
+              await entity.delete();
+            }
           }
         }
       }
-      if (await _metaDir.exists()) {
-        await for (final entity in _metaDir.list()) {
-          if (entity is File && entity.path.contains('.staged.')) {
+    } catch (e, stack) {
+      AppLogger.warning('Error during crash recovery: $e\n$stack');
+    }
+  }
+
+  /// Removes older generation asset files for [productId] that are no longer referenced.
+  Future<void> _cleanUnreferencedGenerations(
+    String productId, {
+    required String activeRelativeFile,
+  }) async {
+    try {
+      if (!await _completedDir.exists()) return;
+
+      await for (final entity in _completedDir.list()) {
+        if (entity is File) {
+          final name = entity.uri.pathSegments.last;
+          if (name != activeRelativeFile &&
+              (name.startsWith('${productId}_gen') ||
+                  name == '$productId.bak' ||
+                  name.startsWith('$productId.staged'))) {
             await entity.delete();
           }
         }
       }
     } catch (e) {
-      AppLogger.warning('Error cleaning up orphaned staged files: $e');
+      AppLogger.warning(
+        'Error cleaning unreferenced generations for $productId: $e',
+      );
     }
   }
 
@@ -358,6 +464,9 @@ class LocalDataStorageService {
         }
         await metaFile.delete();
       }
+
+      // Also clean any unreferenced files or generations for this product
+      await _cleanUnreferencedGenerations(productId, activeRelativeFile: '');
     } catch (e, stack) {
       AppLogger.error(
         'Error deleting asset $productId: $e',
