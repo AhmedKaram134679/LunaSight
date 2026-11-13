@@ -221,14 +221,16 @@ To guarantee numerical stability across the entire binary64 exponent dynamic ran
 4. Scale all components by $m$:
    $$x' = x / m, \quad y' = y / m, \quad z' = z / m$$
 5. Compute the scaled Euclidean sum:
-   $$\|\vec{v}\| = m \cdot \sqrt{(x')^2 + (y')^2 + (z')^2}$$
-6. If the final product $m \cdot \sqrt{\dots}$ overflows to infinity (which can occur only if $m$ is within a factor of $\sqrt{3}$ of $\Omega$), throw `ScientificComputationException(code: 'MAGNITUDE_OVERFLOW')`.
+   $$s' = \sqrt{(x')^2 + (y')^2 + (z')^2}$$
+6. Compute the final magnitude multiplication $L = m \cdot s'$.
+   - If the resulting floating-point value $L$ is non-finite (`!L.isFinite`), throw `ScientificComputationException(code: 'MAGNITUDE_OVERFLOW')`.
+   - *Operational Overflow Boundary:* Under IEEE-754 round-to-nearest semantics, whether $m \cdot s'$ overflows to infinity depends on whether the mathematical product reaches the overflow rounding boundary. The algorithm does not rely on an arbitrary epsilon or assume a simplistic threshold; rather, it operationalizes the check by directly testing the finiteness of the final computed binary64 product $L$.
 
 **Specific Guarantees of Scaled Magnitude:**
-- Prevents overflow in the intermediate component squares $(x')^2, (y')^2, (z')^2$.
-- Prevents the scaled sum of squares from underflowing to zero for any non-zero vector (since at least one $(x')^2 == 1.0$).
+- Intermediate scaled component squaring $(x')^2, (y')^2, (z')^2$ cannot overflow for any finite input components.
+- The scaled sum of squares remains non-zero for any non-zero finite input vector (since at least one $(x')^2 == 1.0$).
 - Very small scaled component ratios may lose relative precision or underflow to zero.
-- The final magnitude can overflow if the true mathematical magnitude exceeds $\Omega$; this condition is explicitly detected and reported via `MAGNITUDE_OVERFLOW`.
+- A non-finite final magnitude result from the multiplication $m \cdot s'$ is reliably detected and reported as `MAGNITUDE_OVERFLOW`.
 
 ##### Algorithm 2: Scaled Normalization & Its Precise Guarantees
 To compute the unit vector $\hat{v} = \vec{v} / \|\vec{v}\|$:
@@ -340,6 +342,11 @@ class FramedVector3 {
   });
 }
 ```
+- **Spatial Vector Metadata vs Time-Tagged Ephemeris States:**
+  - `FramedVector3` represents a purely spatial 3D vector with attached frame orientation, origin, and unit metadata.
+  - **It is NOT an epoch-tagged ephemeris state.**
+  - Dynamic astronomical observations, satellite trajectories, and planetary positions vary with time and require rigorous epoch and time-scale definitions (e.g. UTC, TDB, TT). Any future time-dependent ephemeris state representation must carry its observation epoch and time scale explicitly in its own dedicated contract.
+  - In Phase 04B, no `DateTime`, timestamp, or epoch field is added to `FramedVector3`.
 - **Arithmetic Deferral Invariant:**
   - Mathematical arithmetic operators (`+`, `-`, `*`) are **not** defined directly on `FramedVector3` in Phase 04B.
   - *Reasoning:* Adding or subtracting vectors across different reference frames, origins, or units is mathematically and physically invalid without explicit coordinate translations and rotation matrices. Defining naive component-wise arithmetic on `FramedVector3` would violate the core architectural boundary established in Phase 04A. Frame-aware spatial algebra is deferred to Phase 04C.
@@ -552,9 +559,9 @@ Phase 04B shall be considered complete when:
 1. All domain primitives and value objects specified herein are implemented in `lib/features/scientific_geometry/domain/`.
 2. All non-finite inputs, negative distances, zero-vector normalizations, arithmetic overflows, and division-by-zero operations throw `ScientificComputationException`.
 3. The scaled magnitude and scaled normalization algorithms satisfy the following verifiable criteria:
-   - No intermediate squaring overflow occurs in the scaled sum-of-squares calculation for any finite vector.
-   - The scaled sum of squares cannot underflow to zero for any non-zero finite input vector.
-   - Final magnitude overflow is correctly detected and reported via `MAGNITUDE_OVERFLOW` when the true magnitude exceeds the binary64 representable range.
+   - Intermediate scaled component squaring cannot overflow for any finite input components in the scaled sum-of-squares calculation.
+   - The scaled sum of squares remains non-zero for any non-zero finite input vector.
+   - Final magnitude overflow from the final scaling multiplication is reliably detected and reported via `MAGNITUDE_OVERFLOW` whenever the floating-point result is non-finite.
    - Behavior when negligible component ratios or their squares underflow is fully documented and verified against test cases.
    - Representative large, small, and mixed-exponent vectors normalize correctly within the explicitly proposed test tolerances.
 4. Automated unit test suite under `test/features/scientific_geometry/` executes with 100% pass rate.
