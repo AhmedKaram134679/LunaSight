@@ -146,9 +146,12 @@ A reference frame is not defined by a simple name string alone. To prevent physi
    - Dynamically offset from `MOON_ME` by small, ephemeris-dependent orientation angles.
 3. **Ephemeris-Dependent Frame Realizations (`DE421` vs `DE440`):**
    - The Moon's physical orientation depends on the planetary ephemeris integration and physical libration parameters fitted to LLR data.
-   - In NAIF SPICE specifications, the DE421 orientation realization is designated `MOON_ME_DE421` (or historical `MOON_ME`).
-   - For `DE440`, NAIF defines `MOON_PA_DE440` and `MOON_ME_DE440_ME421` (a Mean Earth frame adjusted by constant rotation offsets to maintain alignment with the DE421 Mean Earth frame).
-   - *Status:* **UNRESOLVED** (The exact rotation matrix between DE440 ME realizations and the Phase 02 DE421 DEM frame must be verified before runtime integration).
+   - In NAIF SPICE specifications (`moon_de440_220930.tf` and predecessor kernel `moon_080317.tf`):
+     - For `DE421`, the orientation frame is designated `MOON_ME_DE421` (NAIF ID `31006`), historically aliased as generic `MOON_ME`.
+     - For `DE440`, NAIF defines the principal axes frame `MOON_PA_DE440` (NAIF ID `31008`) and the Mean Earth frame `MOON_ME_DE440_ME421` (NAIF ID `31007`).
+     - Crucially, `MOON_ME_DE440_ME421` was explicitly constructed by NAIF using constant rotational offsets relative to `MOON_PA_DE440` to closely align the DE440 Mean Earth frame with the predecessor `MOON_ME_DE421` frame.
+     - Generic aliases such as `MOON_ME` may be re-associated across kernel versions.
+   - *Status:* **UNRESOLVED** (The precise rotational transformation between `MOON_ME_DE440_ME421`, `MOON_ME_DE421`, and LOLA DEM coordinates must be verified before runtime integration in Phase 04B).
 
 ### 6.3 Frame Transformation Requirements
 Vector operations combining coordinates across different origins or frames are strictly prohibited unless a documented transformation is explicitly applied:
@@ -167,6 +170,9 @@ Astronomical and planetary calculations involve distinct time scales that must n
 
 1. **UTC (Coordinated Universal Time):** Civil atomic time with leap seconds; discontinuous at leap second transitions.
 2. **UT / UT1 (Universal Time):** Measure of Earth's rotation angle; non-uniform.
+   - *Horizons Historical UT Semantics:* In JPL Horizons, the time label `UT` has historical epoch dependence:
+     - Prior to January 1, 1962: `UT` denotes **UT1** (Earth rotation angle time).
+     - From January 1, 1962 onward: `UT` denotes **UTC** (civil broadcast time with leap seconds).
 3. **TT (Terrestrial Time):** Uniform theoretical time scale of a clock on the geoid: $\text{TT} = \text{TAI} + 32.184\text{ s}$.
 4. **TDB (Barycentric Dynamical Time):** Relativistic coordinate time scale evaluated at the Solar System Barycenter; independent time argument of JPL planetary ephemerides (DE421, DE440, DE441). Differs from TT by small periodic variations ($< 2\text{ ms}$).
 
@@ -176,7 +182,7 @@ According to the official JPL Horizons API documentation:
 - **`EPHEM_TYPE=VECTORS`:** The time parameter `TIME_TYPE` accepts **`TDB`** (default) or **`UT`**.
 - **`EPHEM_TYPE=ELEMENTS`:** Outputs are referenced in **`TDB`**.
 
-*Rule:* Every ingested Horizons record must explicitly preserve both the source timestamp string and the specific time scale indicated in the response header (`TDB`, `TT`, or `UT`), without assuming universal TDB conversion.
+*Rule:* Every ingested Horizons record must explicitly preserve both the source timestamp string and the specific time scale indicated in the response header (`TDB`, `TT`, or `UT`). Silent conversion between UT, UT1, UTC, TT, and TDB is strictly prohibited without an explicit, documented conversion algorithm.
 
 *Status: **PROJECT CONTRACT***
 
@@ -197,7 +203,7 @@ According to the official JPL Horizons API documentation:
      - Gravitational deflection of light rays by intervening solar system bodies.
      - Stellar aberration due to observer motion.
      - Precession and nutation of the reference frame, where applicable.
-     - Atmospheric refraction (applicable only for observers on planetary bodies with atmospheres; zero for airless lunar surface stations).
+     - Atmospheric refraction (available only for Earth-based observers; atmospheric refraction corrections are not available or applied by Horizons for lunar surface observers).
    - In Horizons, apparent topocentric angles (Quantity #4: Apparent Azimuth & Elevation) represent these corrected apparent directions.
 4. **Local Topocentric Angles (Azimuth / Elevation):**
    - **Azimuth ($\text{AZ}$):** Measured clockwise from True North: North = 0°, East = 90°, South = 180°, West = 270°.
@@ -215,22 +221,22 @@ According to the official JPL Horizons API documentation:
 All automated ephemeris queries must target the official REST endpoint:
 `https://ssd.jpl.nasa.gov/api/horizons.api`
 
-The query parameter mapping is governed strictly by the official API specification (`https://ssd-api.jpl.nasa.gov/doc/horizons.html`):
+The query parameter mapping is governed strictly by the official API specification (`https://ssd-api.jpl.nasa.gov/doc/horizons.html`) and user manual:
 
-| API Parameter | Role / Definition | Allowed Values in API | LunaSight Architectural Mapping |
-|:---|:---|:---|:---|
-| `format` | Response encoding | `'json'`, `'text'` | Always `'json'` |
-| `COMMAND` | Target body designation | Small-body name, SPK ID, or NAIF ID (e.g. `'10'` for Sun, `'399'` for Earth) | Strongly-typed NAIF target ID |
-| `EPHEM_TYPE` | Ephemeris mode | `'OBSERVER'`, `'VECTORS'`, `'ELEMENTS'`, `'SPK'` | `'VECTORS'` for Cartesian states; `'OBSERVER'` for topocentric AZ/EL |
-| `CENTER` | Origin / Observer location | Body ID (e.g. `'@301'` for Moon center, `'500@399'` for geocenter) or `'coord@301'` for custom topocentric surface site | Explicit center identifier |
-| `COORD_TYPE` | Coordinate type for site | `'GEODETIC'` or `'CYLINDRICAL'` | Required when `CENTER='coord@...'` |
-| `SITE_COORD` | Surface site coordinates | Comma-separated string `'<lon>,<lat>,<alt>'` | Longitude (° East), Latitude (°), Altitude ($\text{km}$) relative to reference spheroid |
-| `REF_SYSTEM` | Reference system | `'ICRF'` (default) or `'B1950'` | Always `'ICRF'`. *Note: `MOON_ME` is NOT a valid `REF_SYSTEM` parameter.* |
-| `REF_PLANE` | Reference plane for vectors | `'FRAME'`, `'ECLIPTIC'`, or `'BODY EQUATOR'` | `'FRAME'` for ICRF-aligned; `'BODY EQUATOR'` for body equator and equinox |
-| `VEC_CORR` | Vector correction level | `'NONE'` (geometric), `'LT'` (light-time), `'LT+S'` (light-time + aberration) | Explicitly captured per vector request |
-| `TIME_TYPE` | Time scale interpretation | For Observer: `'UT'`, `'TT'`. For Vectors: `'TDB'`, `'UT'` | Explicitly specified and tracked |
-| `QUANTITIES` | Observer table quantities | Comma-separated integer codes (e.g. `'4'` for Apparent AZ/EL, `'20'` for range) | Used exclusively for `EPHEM_TYPE=OBSERVER` |
-| `START_TIME`, `STOP_TIME`, `STEP_SIZE` | Epoch interval specification | ISO-8601 or Julian date strings; step syntax (e.g. `'1h'`, `'10m'`) | Ephemeris query interval |
+| API Parameter | Applicable Ephemeris Type | Role / Definition | Allowed Values in API | LunaSight Architectural Mapping |
+|:---|:---|:---|:---|:---|
+| `format` | All | Response encoding | `'json'`, `'text'` | Always `'json'` |
+| `COMMAND` | All | Target body designation | Small-body name, SPK ID, or NAIF ID (e.g. `'10'` for Sun, `'399'` for Earth) | Strongly-typed NAIF target ID |
+| `EPHEM_TYPE` | All | Ephemeris mode | `'OBSERVER'`, `'VECTORS'`, `'ELEMENTS'`, `'SPK'` | `'VECTORS'` for Cartesian states; `'OBSERVER'` for topocentric AZ/EL |
+| `CENTER` | All | Origin / Observer location | Body ID (e.g. `'@301'` for Moon center, `'500@399'` for geocenter) or `'coord@301'` for custom topocentric surface site | Explicit center identifier |
+| `COORD_TYPE` | `coord@...` | Coordinate type for site | `'GEODETIC'` or `'CYLINDRICAL'` | Required when `CENTER='coord@...'` |
+| `SITE_COORD` | `coord@...` | Surface site coordinates | Comma-separated string `'<lon>,<lat>,<alt>'` | Longitude (° East), Latitude (°), Altitude ($\text{km}$) relative to reference ellipsoid |
+| `REF_SYSTEM` | `OBSERVER`, `VECTORS` | Celestial frame orientation | `'ICRF'` (default) or `'B1950'` | Always `'ICRF'`. Defines celestial frame orientation; does not define topocentric AZ/EL axes. *Note: `MOON_ME` is NOT a valid `REF_SYSTEM` parameter.* |
+| `REF_PLANE` | `VECTORS`, `ELEMENTS` | Reference plane for vectors | `'FRAME'`, `'ECLIPTIC'`, or `'BODY EQUATOR'` | `'FRAME'` for ICRF-aligned; `'BODY EQUATOR'` for body equator and equinox. *Note: Does not apply to `OBSERVER`.* |
+| `VEC_CORR` | `VECTORS` | Vector correction level | `'NONE'` (geometric), `'LT'` (light-time), `'LT+S'` (light-time + aberration) | Explicitly captured per vector request. *Note: Does not apply to `OBSERVER`.* |
+| `TIME_TYPE` | `OBSERVER`, `VECTORS` | Time scale interpretation | For Observer: `'UT'`, `'TT'`. For Vectors: `'TDB'`, `'UT'` | Explicitly specified and tracked |
+| `QUANTITIES` | `OBSERVER` | Observer table quantities | Comma-separated integer codes (e.g. `'4'` for Apparent AZ/EL, `'20'` for range) | Used exclusively for `EPHEM_TYPE=OBSERVER` |
+| `START_TIME`, `STOP_TIME`, `STEP_SIZE` | All | Epoch interval specification | ISO-8601 or Julian date strings; step syntax (e.g. `'1h'`, `'10m'`) | Ephemeris query interval |
 
 *Correction Note:* Previous draft incorrectly suggested `REF_SYSTEM='MOON_ME'` and an unverified parameter `EPHEM=DE421`. The official Horizons API only supports `REF_SYSTEM` as `ICRF` or `B1950`, does not support `MOON_ME` in `REF_SYSTEM`, and has no `EPHEM` parameter.
 
@@ -238,14 +244,16 @@ The query parameter mapping is governed strictly by the official API specificati
 When querying topocentric quantities from a lunar landing site:
 1. `CENTER` must be set to `'coord@301'`.
 2. `COORD_TYPE` must be specified as `'GEODETIC'` (or `'CYLINDRICAL'`).
-3. `SITE_COORD` must provide three comma-separated numeric values:
+3. In Horizons, lunar GEODETIC coordinates use the Moon's Mean Earth reference model associated with DE421.
+4. `SITE_COORD` must provide three comma-separated numeric values:
    $$\text{SITE\_COORD} = '\lambda, \phi, h_{\text{km}}'$$
-   - $\lambda$: Selenographic Longitude in degrees East ($0° \le \lambda \le 360°$ or $-180° \le \lambda \le +180°$).
-   - $\phi$: Selenographic Latitude in degrees ($[-90°, +90°]$).
-   - $h_{\text{km}}$: Altitude in **kilometers** above the reference body datum.
-4. *Source Units Note:* Horizons requires altitude in kilometers ($\text{km}$), while LunaSight internal units are meters ($\text{m}$). Conversion boundary must divide internal meters by $1,000.0$ before constructing the `SITE_COORD` parameter.
+   - $\lambda$: Planetodetic / geodetic East Longitude in degrees ($0° \le \lambda \le 360°$ or $-180° \le \lambda \le +180°$).
+   - $\phi$: Planetodetic / geodetic Latitude in degrees ($[-90°, +90°]$).
+   - $h_{\text{km}}$: Geodetic altitude in **kilometers** above the applicable lunar reference ellipsoid (not an arbitrary spherical datum).
+5. *Datum and Elevation Invariant:* LunaSight's LOLA DEM elevation is referenced to a spherical datum with constant radius $R_L = 1,737,400\text{ m}$. In contrast, Horizons' geodetic coordinates reference a triaxial/biaxial reference ellipsoid. Direct passing of spherical DEM elevation as ellipsoidal geodetic altitude without transformation is mathematically unvalidated.
+   - *Status:* **UNRESOLVED** (The exact conversion model mapping LunaSight spherical elevation $h_{\text{DEM}}$ to Horizons geodetic altitude $h_{\text{geodetic}}$ must be specified before automated `coord@301` queries are enabled in runtime).
 
-*Status: **VERIFIED** (NASA JPL Horizons API Documentation).*
+*Status: **VERIFIED** (NASA JPL Horizons API Documentation & User Manual).*
 
 ---
 
@@ -270,8 +278,10 @@ Selenographic coordinates $(\phi, \lambda)$ represent:
    - Positive $h$: Surface above $1,737.4\text{ km}$ sphere.
    - Negative $h$: Surface below $1,737.4\text{ km}$ sphere.
 3. **Cartesian Selenocentric Position Vector ($\vec{P}_{\text{site}}$ in `MOON_ME`):**
-   Under a spherical datum approximation with surface elevation $h$:
+   Under a spherical datum approximation where $\phi$ is interpreted as geocentric/selenocentric latitude:
    $$\vec{P}_{\text{site}} = (R_L + h) \begin{pmatrix} \cos\phi \cos\lambda \\ \cos\phi \sin\lambda \\ \sin\phi \end{pmatrix}$$
+   *Important Distinction:* Geodetic (planetodetic) latitude $\phi_{\text{geodetic}}$ is not identical to geocentric (selenocentric) latitude $\phi_{\text{geocentric}}$. For a non-spherical reference ellipsoid with flattening $f$, the relationship is $\tan\phi_{\text{geocentric}} = (1 - f)^2 \tan\phi_{\text{geodetic}}$. The above Cartesian equation represents a spherical approximation.
+   - *Status:* **UNRESOLVED** (Rigorous conversion from lunar geodetic reference ellipsoid parameters to Cartesian coordinates must be formally specified when non-spherical reference bodies are evaluated).
 
 *Status: **VERIFIED** (NASA PGDA Product 81 & USGS PSDI Lunar Standards).*
 
@@ -283,8 +293,13 @@ At any lunar landing site with coordinates $(\phi, \lambda)$, a local orthonorma
 
 ### 11.1 Basis Vector Definitions
 1. **Up Vector ($\hat{U}$):**
-   Radial unit vector normal to the reference sphere pointing outward toward local zenith:
+   Spherical radial unit vector pointing outward along the radius vector from the lunar center of mass toward local zenith:
    $$\hat{U} = \begin{pmatrix} \cos\phi \cos\lambda \\ \cos\phi \sin\lambda \\ \sin\phi \end{pmatrix}$$
+   *Distinction among Up Vector Concepts:*
+   - **Spherical Radial Up:** Points directly away from the center of mass along the radial vector.
+   - **Ellipsoidal Geodetic Up:** Normal to the reference ellipsoid surface; deviates from radial Up by the deflection of the normal (negligible for near-spherical bodies but mathematically distinct).
+   - **Terrain Surface Normal:** Normal to the local topographic slope computed from adjacent DEM elevation cells; represents actual physical ground orientation (deferred to Phase 05 slope/illumination analysis).
+   - *Status:* **UNRESOLVED** (Selection of the topocentric reference plane—spherical radial vs ellipsoidal geodetic—for topocentric coordinate representation must be formally benchmarked in Phase 04B).
 2. **East Vector ($\hat{E}$):**
    Unit vector pointing in the direction of increasing East longitude:
    $$\hat{E} = \begin{pmatrix} -\sin\lambda \\ \cos\lambda \\ 0 \end{pmatrix}$$
@@ -317,15 +332,15 @@ Scientific calculations must never fail silently or produce undefined floating-p
      $$\text{clamped} = \max(-1.0, \min(1.0, \hat{a} \cdot \hat{b}))$$
 
 ### 12.2 Numerical Thresholds Status & Verification Evidence
-Previous draft listed arbitrary thresholds without documented derivations. All numerical threshold values are categorized below with their required verification evidence:
+Previous draft listed arbitrary thresholds without documented derivations. All numerical threshold values are categorized below with their required verification evidence and physical basis:
 
-| Threshold / Parameter | Proposed Value | Category | Required Verification Evidence |
+| Threshold / Parameter | Proposed Value | Category | Verification Requirement & Physical / Scale Basis |
 |:---|:---:|:---:|:---|
-| **Zero-Vector Norm Threshold** ($\epsilon_{\text{zero}}$) | $1.0 \times 10^{-12}\text{ m}$ | **PROPOSED** | Derive against 64-bit IEEE 754 precision for lunar scale ($\sim 2 \times 10^6\text{ m}$) and verify that vectors smaller than this produce explicit exceptions without underflow. |
-| **Polar Singularity Angle** ($\epsilon_{\text{pole}}$) | $1.0 \times 10^{-7}\text{ rad}$ | **PROPOSED** | Compare topocentric basis stability within $0.2\text{ meters}$ of true pole against IAU polar cartographic standards. |
-| **Zenith Azimuth Indeterminacy** ($\cos\text{EL}$) | $1.0 \times 10^{-6}$ | **PROPOSED** | Evaluate angular resolution limits where horizontal projection norm loss produces numerical jitter in $\text{atan2}(E, N)$. |
-| **Horizons Acceptance Tolerance** ($\Delta\theta$) | $0.01°$ ($36''$) | **UNRESOLVED** | Perform empirical benchmark comparison between Horizons topocentric observer tables and local vector projections across varying light-time and aberration modes. |
-| **Round-Trip Frame Transform Loss** ($\Delta r$) | $1.0 \times 10^{-6}\text{ m}$ | **PROPOSED** | Test matrix inversion precision $R^T R = I$ across 10,000 random spatial rotations using IEEE 754 double precision. |
+| **Zero-Vector Norm Threshold** ($\epsilon_{\text{zero}}$) | $1.0 \times 10^{-12}\text{ m}$ | **PROPOSED** | Required to prevent divide-by-zero during normalization. Sub-picometer threshold is well below any physical scale of interest (lunar radius $\sim 1.7 \times 10^6\text{ m}$) while remaining well above IEEE 754 double precision subnormal limits ($\sim 10^{-308}$). |
+| **Polar Singularity Angle** ($\epsilon_{\text{pole}}$) | $1.0 \times 10^{-7}\text{ rad}$ | **PROPOSED** | Scale-dependent threshold corresponding to $\sim 0.17\text{ m}$ horizontal displacement from true pole on the lunar surface. Verifies numerical stability of trigonometric projections before meridian convergence triggers indeterminacy. |
+| **Zenith Azimuth Indeterminacy** ($\cos\text{EL}$) | $1.0 \times 10^{-6}$ | **PROPOSED** | Angular proximity limit where projection onto horizontal $(E, N)$ plane approaches zero norm, producing numerical noise in $\text{atan2}(E, N)$. |
+| **Horizons Acceptance Tolerance** ($\Delta\theta$) | $0.01°$ ($36''$) | **UNRESOLVED** | Application accuracy target for validation testing between Horizons topocentric observer tables and internal geometric vector models, subject to verification of light-time and aberration effects. |
+| **Round-Trip Frame Transform Loss** ($\Delta r$) | $1.0 \times 10^{-6}\text{ m}$ | **PROPOSED** | Numerical precision limit ($1\ \mu\text{m}$) verifying matrix orthogonality ($R^T R = I$) across sequential spatial frame transformations using 64-bit IEEE 754 arithmetic. |
 
 *Rule:* None of the above proposed thresholds shall become locked project contracts until the specified verification tests have been executed and documented.
 
