@@ -166,8 +166,8 @@ void main() {
 
   group('TiledTerrainDataProvider Boundary & Multi-Tile Selection Tests (Audit C)', () {
     late DemMetadata testMetadata;
-    late DemTile tileA; // Tile (0, 0): X from 0 to 2560m, Y from 0 to -2560m (origin tiepoint (0, 0), pixelScale 10m)
-    late DemTile tileB; // Tile (1, 0): X from 2560 to 5120m, Y from 0 to -2560m
+    late DemTile tileA; // Tile (0, 0): X from -2560 to 0m, Y from 0 to -2560m
+    late DemTile tileB; // Tile (1, 0): X from 0 to 2560m, Y from 0 to -2560m
 
     setUp(() {
       testMetadata = DemMetadata(
@@ -181,22 +181,23 @@ void main() {
         height: 256,
         pixelScaleX: 10.0,
         pixelScaleY: 10.0,
-        tiePointX: 0.0,
+        tiePointX: -2560.0,
         tiePointY: 0.0,
         elevationUnit: ElevationUnit.meters,
         projectedExtent: const ProjectedExtent(
-          minX: 0.0,
-          maxX: 5120.0,
+          minX: -2560.0,
+          maxX: 2560.0,
           minY: -2560.0,
           maxY: 0.0,
         ),
       );
 
-      // Tile A (tileX=0, tileY=0): linear gradient along row: 100.0 + col * 0.1 m
+      // Tile A (tileX=0, tileY=0): 2D spatial gradient:
+      // Elevation = 100.0 + col * 0.1 + row * 0.01 m
       final elevationsA = Float32List(256 * 256);
       for (var r = 0; r < 256; r++) {
         for (var c = 0; c < 256; c++) {
-          elevationsA[r * 256 + c] = 100.0 + c * 0.1;
+          elevationsA[r * 256 + c] = 100.0 + c * 0.1 + r * 0.01;
         }
       }
       tileA = DemTile(
@@ -205,18 +206,19 @@ void main() {
         width: 256,
         height: 256,
         elevations: elevationsA,
-        minX: 0.0,
-        maxX: 2560.0,
+        minX: -2560.0,
+        maxX: 0.0,
         minY: -2560.0,
         maxY: 0.0,
         pixelScale: 10.0,
       );
 
-      // Tile B (tileX=1, tileY=0): linear gradient along row: 200.0 + col * 0.1 m
+      // Tile B (tileX=1, tileY=0): 2D spatial gradient:
+      // Elevation = 500.0 + col * 0.2 + row * 0.03 m
       final elevationsB = Float32List(256 * 256);
       for (var r = 0; r < 256; r++) {
         for (var c = 0; c < 256; c++) {
-          elevationsB[r * 256 + c] = 200.0 + c * 0.1;
+          elevationsB[r * 256 + c] = 500.0 + c * 0.2 + r * 0.03;
         }
       }
       tileB = DemTile(
@@ -225,116 +227,227 @@ void main() {
         width: 256,
         height: 256,
         elevations: elevationsB,
-        minX: 2560.0,
-        maxX: 5120.0,
+        minX: 0.0,
+        maxX: 2560.0,
         minY: -2560.0,
         maxY: 0.0,
         pixelScale: 10.0,
       );
     });
 
-    test('Provider selects correct tile inside Tile A and inside Tile B', () {
+    test('Provider selects correct tile inside Tile A and inside Tile B via getElevation', () {
       final provider = TiledTerrainDataProvider(metadata: testMetadata);
       provider.addTile(tileA);
       provider.addTile(tileB);
 
-      // Point in A: X = 1000m, Y = -1000m.
-      // In Tile A: col = (1000 - 0)/10 - 0.5 = 99.5. Inside bilinear hull [c=99, c=100].
-      // Expected = 100.0 + 99.5 * 0.1 = 109.95 m
-      final (latA, lonA) = provider.projection.inverse(x: 1000.0, y: -1000.0);
+      // Point strictly in A: X = -1000m, Y = -1000m.
+      // In Tile A (minX=-2560, maxY=0):
+      // col = (-1000 - (-2560)) / 10 - 0.5 = 156.0 - 0.5 = 155.5
+      // row = (0 - (-1000)) / 10 - 0.5 = 100.0 - 0.5 = 99.5
+      // Expected = 100.0 + 155.5 * 0.1 + 99.5 * 0.01 = 100.0 + 15.55 + 0.995 = 116.545 m
+      final (latA, lonA) = provider.projection.inverse(x: -1000.0, y: -1000.0);
       final sampleA = provider.getElevation(latA, lonA);
       expect(sampleA.isValid, isTrue);
-      expect(sampleA.elevationMeters, closeTo(109.95, 1e-3));
+      expect(sampleA.status, ElevationSampleStatus.validBilinear);
+      expect(sampleA.elevationMeters, closeTo(116.545, 1e-3));
 
-      // Point in B: X = 3560m, Y = -1000m.
-      // In Tile B (minX=2560): col = (3560 - 2560)/10 - 0.5 = 99.5.
-      // Expected = 200.0 + 99.5 * 0.1 = 209.95 m
-      final (latB, lonB) = provider.projection.inverse(x: 3560.0, y: -1000.0);
+      // Point strictly in B: X = 1000m, Y = -1000m.
+      // In Tile B (minX=0, maxY=0):
+      // col = (1000 - 0) / 10 - 0.5 = 99.5
+      // row = (0 - (-1000)) / 10 - 0.5 = 99.5
+      // Expected = 500.0 + 99.5 * 0.2 + 99.5 * 0.03 = 500.0 + 19.9 + 2.985 = 522.885 m
+      final (latB, lonB) = provider.projection.inverse(x: 1000.0, y: -1000.0);
       final sampleB = provider.getElevation(latB, lonB);
       expect(sampleB.isValid, isTrue);
-      expect(sampleB.elevationMeters, closeTo(209.95, 1e-3));
+      expect(sampleB.status, ElevationSampleStatus.validBilinear);
+      expect(sampleB.elevationMeters, closeTo(522.885, 1e-3));
     });
 
-    test('Shared boundary behavior between Tile A and Tile B (boundary at X = 2560m)', () {
+    test('Shared boundary behavior at exact South Pole projected origin (X = 0, Y = 0)', () {
       final provider = TiledTerrainDataProvider(metadata: testMetadata);
       provider.addTile(tileA);
       provider.addTile(tileB);
 
-      // 1. Immediately on A side: X = 2559.0m (tileX = 0)
-      // In Tile A: col = (2559.0 - 0)/10 - 0.5 = 255.4.
-      // col > 255.0 (outside bilinear hull c in [0, 255]), falls back to nearest neighbor c=255.
-      // Elevation at c=255 in Tile A is 100.0 + 255 * 0.1 = 125.5 m.
-      final (latA, lonA) = provider.projection.inverse(x: 2559.0, y: -1000.0);
-      final sampleA = provider.getElevation(latA, lonA);
-      expect(sampleA.isValid, isTrue);
-      expect(sampleA.status, ElevationSampleStatus.validNearestNeighbor);
-      expect(sampleA.elevationMeters, closeTo(125.5, 1e-3));
+      // The exact South Pole (-90° lat, any lon) forward-projects mathematically to (0.0, 0.0) meters.
+      // Under half-open tile indexing [X_0, X_1):
+      // Tile A: [-2560, 0)
+      // Tile B: [0, 2560)
+      // At X = 0.0: col = (0.0 - (-2560)) / 10 = 256.0. tileX = floor(256.0 / 256) = 1 (Tile B).
+      // In Tile B (minX=0, maxX=2560, minY=-2560, maxY=0):
+      // col = (0.0 - 0) / 10 - 0.5 = -0.5
+      // row = (0 - 0.0) / 10 - 0.5 = -0.5
+      // Outer border (col < 0, row < 0) falls back to nearest neighbor (c=0, r=0).
+      // Expected Tile B sample at (c=0, r=0): 500.0 + 0 * 0.2 + 0 * 0.03 = 500.0 m.
+      final southPoleLat = Angle.fromDegrees(-90.0);
+      final southPoleLon = Angle.fromDegrees(0.0);
 
-      // 2. Immediately on B side: X = 2561.0m (tileX = 1)
-      // In Tile B: col = (2561.0 - 2560)/10 - 0.5 = -0.4.
-      // col < 0.0 (outside bilinear hull), falls back to nearest neighbor c=0.
-      // Elevation at c=0 in Tile B is 200.0 + 0 * 0.1 = 200.0 m.
-      final (latB, lonB) = provider.projection.inverse(x: 2561.0, y: -1000.0);
-      final sampleB = provider.getElevation(latB, lonB);
-      expect(sampleB.isValid, isTrue);
-      expect(sampleB.status, ElevationSampleStatus.validNearestNeighbor);
-      expect(sampleB.elevationMeters, closeTo(200.0, 1e-3));
-
-      // 3. Exactly on shared boundary:
-      // Tile A covers [0, 2560] and Tile B covers [2560, 5120].
-      // At maxX of Tile A (2560.0): col = 255.5 -> nearest neighbor c=255 -> 125.5 m
-      // At minX of Tile B (2560.0): col = -0.5 -> nearest neighbor c=0 -> 200.0 m
-      expect(tileA.sampleBilinear(2560.0, -1000.0), closeTo(125.5, 1e-3));
-      expect(tileB.sampleBilinear(2560.0, -1000.0), closeTo(200.0, 1e-3));
-
-      // Provider selection for coordinates approaching boundary from left (Tile A) vs right (Tile B):
-      final (latLeft, lonLeft) = provider.projection.inverse(
-        x: 2559.9,
-        y: -1000.0,
-      );
-      final (latRight, lonRight) = provider.projection.inverse(
-        x: 2560.1,
-        y: -1000.0,
-      );
-      expect(
-        provider.getElevation(latLeft, lonLeft).elevationMeters,
-        closeTo(125.5, 1e-3),
-      );
-      expect(
-        provider.getElevation(latRight, lonRight).elevationMeters,
-        closeTo(200.0, 1e-3),
-      );
+      final samplePole = provider.getElevation(southPoleLat, southPoleLon);
+      expect(samplePole.isValid, isTrue);
+      expect(samplePole.status, ElevationSampleStatus.validNearestNeighbor);
+      // Strictly proves Tile B ownership at exact boundary:
+      expect(samplePole.elevationMeters, closeTo(500.0, 1e-3));
+      // If Tile A were erroneously selected, sample would be near 100 + 255 * 0.1 = ~125.5 m!
+      expect(samplePole.elevationMeters, isNot(closeTo(125.5, 10.0)));
     });
 
-    test('Tile loading order invariance across shared boundary', () {
-      // Test that loading Tile B first, then Tile A, produces identical elevation results
+    test('Shared boundary behavior immediately before, at, and immediately after boundary via getElevation', () {
+      final provider = TiledTerrainDataProvider(metadata: testMetadata);
+      provider.addTile(tileA);
+      provider.addTile(tileB);
+
+      // 1. Immediately on A side: X = -10.0m, Y = -1000m
+      // In Tile A: col = (-10.0 - (-2560)) / 10 - 0.5 = 255.0 - 0.5 = 254.5.
+      // row = (0 - (-1000)) / 10 - 0.5 = 99.5.
+      // Valid bilinear: 100.0 + 254.5 * 0.1 + 99.5 * 0.01 = 126.445 m.
+      final (latBefore, lonBefore) = provider.projection.inverse(
+        x: -10.0,
+        y: -1000.0,
+      );
+      final sampleBefore = provider.getElevation(latBefore, lonBefore);
+      expect(sampleBefore.isValid, isTrue);
+      expect(sampleBefore.elevationMeters, closeTo(126.445, 1e-2));
+
+      // 2. Exact South Pole meridian boundary at Y = 0:
+      // Exact South Pole (0, 0) is owned by Tile B:
+      final sampleBoundary = provider.getElevation(
+        Angle.fromDegrees(-90.0),
+        Angle.fromDegrees(0.0),
+      );
+      expect(sampleBoundary.elevationMeters, closeTo(500.0, 1e-3));
+
+      // 3. Immediately on B side: X = +10.0m, Y = -1000m
+      // In Tile B: col = (10.0 - 0) / 10 - 0.5 = 0.5.
+      // row = (0 - (-1000)) / 10 - 0.5 = 99.5.
+      // Valid bilinear: 500.0 + 0.5 * 0.2 + 99.5 * 0.03 = 500.0 + 0.1 + 2.985 = 503.085 m.
+      final (latAfter, lonAfter) = provider.projection.inverse(
+        x: 10.0,
+        y: -1000.0,
+      );
+      final sampleAfter = provider.getElevation(latAfter, lonAfter);
+      expect(sampleAfter.isValid, isTrue);
+      expect(sampleAfter.elevationMeters, closeTo(503.085, 1e-2));
+    });
+
+    test('Tile loading order invariance: rigorous comparison of providerAB vs providerBA across boundary', () {
+      final providerAB = TiledTerrainDataProvider(metadata: testMetadata);
+      providerAB.addTile(tileA);
+      providerAB.addTile(tileB);
+
       final providerBA = TiledTerrainDataProvider(metadata: testMetadata);
       providerBA.addTile(tileB);
       providerBA.addTile(tileA);
 
-      final (latA, lonA) = providerBA.projection.inverse(x: 1000.0, y: -1000.0);
-      final (latB, lonB) = providerBA.projection.inverse(x: 3560.0, y: -1000.0);
+      final testPoints = <(Angle, Angle)>[
+        // Exact shared boundary at South Pole:
+        (Angle.fromDegrees(-90.0), Angle.fromDegrees(0.0)),
+        (Angle.fromDegrees(-90.0), Angle.fromDegrees(45.0)),
+        // Inside Tile A:
+        providerAB.projection.inverse(x: -1000.0, y: -1000.0),
+        providerAB.projection.inverse(x: -200.0, y: -500.0),
+        providerAB.projection.inverse(x: -10.0, y: -1000.0),
+        // Inside Tile B:
+        providerAB.projection.inverse(x: 10.0, y: -1000.0),
+        providerAB.projection.inverse(x: 500.0, y: -500.0),
+        providerAB.projection.inverse(x: 1000.0, y: -1000.0),
+      ];
 
-      expect(
-        providerBA.getElevation(latA, lonA).elevationMeters,
-        closeTo(109.95, 1e-3),
-      );
-      expect(
-        providerBA.getElevation(latB, lonB).elevationMeters,
-        closeTo(209.95, 1e-3),
-      );
+      for (final (lat, lon) in testPoints) {
+        final sampleAB = providerAB.getElevation(lat, lon);
+        final sampleBA = providerBA.getElevation(lat, lon);
+
+        expect(
+          sampleAB.status,
+          sampleBA.status,
+          reason: 'Sample status must be identical for lat $lat, lon $lon',
+        );
+        expect(sampleAB.isValid, sampleBA.isValid);
+        expect(
+          sampleAB.elevationMeters,
+          sampleBA.elevationMeters,
+          reason:
+              'Elevation meters must match identically across loading orders for lat $lat, lon $lon',
+        );
+      }
     });
 
-    test('Missing neighboring tile behavior at boundary', () {
-      // Load only Tile A, omitting Tile B
+    test(
+      'Missing neighboring tile behavior at shared boundary via getElevation',
+      () {
+        // Load only Tile A (Tile B missing)
+        final providerOnlyA = TiledTerrainDataProvider(metadata: testMetadata);
+        providerOnlyA.addTile(tileA);
+
+        // Query exact South Pole (0, 0), which is routed to Tile B:
+        final samplePoleWithoutB = providerOnlyA.getElevation(
+          Angle.fromDegrees(-90.0),
+          Angle.fromDegrees(0.0),
+        );
+        // Because Tile B is missing, query at boundary must return outsideCoverage:
+        expect(samplePoleWithoutB.isValid, isFalse);
+        expect(
+          samplePoleWithoutB.status,
+          ElevationSampleStatus.outsideCoverage,
+        );
+
+        // Query on A side must still succeed:
+        final (latA, lonA) = providerOnlyA.projection.inverse(
+          x: -1000.0,
+          y: -1000.0,
+        );
+        final sampleA = providerOnlyA.getElevation(latA, lonA);
+        expect(sampleA.isValid, isTrue);
+        expect(sampleA.elevationMeters, closeTo(116.545, 1e-3));
+
+        // Load only Tile B (Tile A missing)
+        final providerOnlyB = TiledTerrainDataProvider(metadata: testMetadata);
+        providerOnlyB.addTile(tileB);
+
+        // Query exact South Pole (0, 0), which is routed to Tile B:
+        final samplePoleWithB = providerOnlyB.getElevation(
+          Angle.fromDegrees(-90.0),
+          Angle.fromDegrees(0.0),
+        );
+        // Since Tile B is loaded, it owns (0,0) and succeeds:
+        expect(samplePoleWithB.isValid, isTrue);
+        expect(samplePoleWithB.elevationMeters, closeTo(500.0, 1e-3));
+
+        // Query on A side must return outsideCoverage:
+        final sampleAWithoutA = providerOnlyB.getElevation(latA, lonA);
+        expect(sampleAWithoutA.isValid, isFalse);
+        expect(sampleAWithoutA.status, ElevationSampleStatus.outsideCoverage);
+      },
+    );
+
+    test('NoData at the selected tile nearest sample returns noData status via getElevation', () {
+      // Modify sample (0, 0) of Tile B to be NoData (-9999.0)
+      final elevationsBWithNoData = Float32List.fromList(tileB.elevations);
+      elevationsBWithNoData[0] = -9999.0;
+      final tileBWithNoData = DemTile(
+        tileX: 1,
+        tileY: 0,
+        width: 256,
+        height: 256,
+        elevations: elevationsBWithNoData,
+        minX: 0.0,
+        maxX: 2560.0,
+        minY: -2560.0,
+        maxY: 0.0,
+        pixelScale: 10.0,
+        noDataValue: -9999.0,
+      );
+
       final provider = TiledTerrainDataProvider(metadata: testMetadata);
       provider.addTile(tileA);
+      provider.addTile(tileBWithNoData);
 
-      // Query on B side (X = 2561.0m)
-      final (latB, lonB) = provider.projection.inverse(x: 2561.0, y: -1000.0);
-      final sampleB = provider.getElevation(latB, lonB);
-      expect(sampleB.isValid, isFalse);
-      expect(sampleB.status, ElevationSampleStatus.outsideCoverage);
+      // Query at South Pole (0, 0) falls back to nearest neighbor (0, 0) in Tile B,
+      // which has NoData:
+      final sample = provider.getElevation(
+        Angle.fromDegrees(-90.0),
+        Angle.fromDegrees(0.0),
+      );
+      expect(sample.isValid, isFalse);
+      expect(sample.status, ElevationSampleStatus.noData);
     });
   });
 }

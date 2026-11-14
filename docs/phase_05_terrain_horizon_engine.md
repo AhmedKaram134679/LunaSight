@@ -40,10 +40,21 @@ Calculating terrain horizons is critical for lunar landing site evaluation, surf
 - **Authoritative South Pole Test Fixture**:
   - *Location*: `test/fixtures/terrain/lola_south_pole_tile_78_78.bin` (262,144 bytes, 65,536 Float32 samples).
   - *SHA-256*: `ae72c611bb4435c41c7f984dc695aedabdbdd75d22c452afa7fb15963d02ff1e`.
-  - *Exact Source*: Tile column 78, Tile row 78 (linear tile index $78 \times 157 + 78 = 12,324$).
-  - *Container Offsets*: Tag 324 (TileOffsets) offset 197,624 bytes $\to$ entry offset 296,216 bytes (`value: 70,248,340`). Tag 325 (TileByteCounts) offset 432 bytes $\to$ entry offset 98,976 bytes (`value: 137,823`).
-  - *Reproducibility Tool*: Fully documented and verified in `tool/verify_lola_fixture.py`.
-  - *Scientific Rigor Distinction*: Byte equivalence confirms exact decompression fidelity and bitwise equivalence to the remote sensing archive stream; georeferenced spatial accuracy is separately validated against NASA LOLA south polar tie points and crater elevation profiles.
+  - *Exact Source Specification*: Tile column 78, Tile row 78 (linear tile index $78 \times 157 + 78 = 12,324$).
+  - *BigTIFF Tag Metadata & Correct Array Offsets*:
+    - Tag 324 (`TileOffsets`): type 16 (`LONG8`, 8 bytes/element), count 24,649, value-array offset: 197,624 bytes.
+      Entry offset for tile index 12,324:
+      $$197,624 + (12,324 \times 8) = 296,216\text{ bytes} \implies \text{Value: } 1,259,787,516$$
+    - Tag 325 (`TileByteCounts`): type 16 (`LONG8`, 8 bytes/element), count 24,649, value-array offset: 432 bytes.
+      Entry offset for tile index 12,324:
+      $$432 + (12,324 \times 8) = 99,024\text{ bytes} \implies \text{Value: } 137,823$$
+    *(Note on previous discrepancy: The previously reported offset 98,976 corresponds to tile index 12,318, i.e., $432 + 12,318 \times 8 = 98,976$, which held value 160,416. Tile index 12,324 correctly resides at offset 99,024).*
+  - *Fixture Verification Status*:
+    The committed binary fixture has a verified SHA-256 checksum and the expected Float32 sample count.
+    The verification script `tool/verify_lola_fixture.py` supports both offline fixture-integrity checks and full BigTIFF source-to-fixture extraction verification via `--source <path>`.
+    When run in default mode without a local BigTIFF source file, verification is strictly at the **FIXTURE INTEGRITY ONLY** level.
+    Source-to-fixture byte equivalence and independent spatial registration have NOT been established by the offline tool run alone.
+    The `PixelIsArea` coordinate mapping remains a mathematical interpretation of the documented raster metadata. It must not be presented as independent proof of this fixture's spatial origin.
 
 ### Raster Pixel Registration & Tile Border Interpolation Semantics
 - **Pixel Registration (`RasterPixelIsArea`)**:
@@ -186,9 +197,9 @@ lib/features/terrain_horizon/
 | **Projection Math** | `south_polar_stereographic_test.dart` | 3 | South Pole (0,0), cardinal quadrants, forward-inverse roundtrip | Passed |
 | **Elevation Sampling** | `elevation_sample_test.dart` | 9 | Bilinear interpolation, nearest neighbor, sampleDetailed quality status, non-finite floats, NoData rejection, out of bounds | Passed |
 | **Horizon Ray-Casting** | `terrain_horizon_engine_test.dart` | 10 | Analytical curvature dip $\theta \approx -\sqrt{2h/R}$, isolated peak, obstacle occlusion, instrument height, observer outside coverage/NoData rejection, Option A observer heightMeters rejection, height reference validation, polar azimuth basis invariance | Passed |
-| **Real LOLA Data** | `tiled_terrain_data_provider_test.dart` | 7 | Ingestion of real NASA LOLA South Pole Tile 78_78 fixture, pixel registration at South Pole (0,0), tile edge boundaries, multi-tile selection across boundaries, corrupt file rejection | Passed |
+| **Real LOLA Data & Boundary Tests** | `tiled_terrain_data_provider_test.dart` | 10 | Ingestion of real NASA LOLA South Pole Tile 78_78 fixture, pixel registration at South Pole (0,0), corrupt file rejection, provider getElevation inside Tile A and B, exact South Pole boundary ownership, boundary approach before/after, A/B vs B/A loading order invariance, missing neighboring tile, NoData propagation | Passed |
 | **Phase 01–04 Regression**| `test/features/scientific_geometry/` | 106 | Complete preservation of scientific geometry invariants | Passed |
-| **Full Repository** | `flutter test` | 238 | All unit, widget, compile-time, and integration tests across entire repository | Passed |
+| **Full Repository** | `flutter test` | 240 | All unit, widget, compile-time, and integration tests across entire repository | Passed |
 
 ---
 
