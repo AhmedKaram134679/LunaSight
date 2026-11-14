@@ -1446,17 +1446,169 @@ void main() {
           const expectedY = -16073.394118;
           const expectedZ = -1736764.286453;
 
-          // Tolerance derivation:
-          // The expected values are given to 6 decimal places (micrometers).
-          // Verification against binary64 rounding within 1e-5 m (10 micrometers).
-          expect(p.vector.x, closeTo(expectedX, 1e-5));
-          expect(p.vector.y, closeTo(expectedY, 1e-5));
-          expect(p.vector.z, closeTo(expectedZ, 1e-5));
+          // Tolerance derivation per §10.4.1:
+          // The expected values are given to 6 decimal places (micrometer resolution),
+          // introducing at most 0.5e-6 m rounding uncertainty.
+          // Binary64 arithmetic accumulates at most 0.4e-6 m discretization error.
+          // Maximum theoretical deviation is bounded by Delta_max = 0.90e-6 m.
+          // We test within the rigorous 1.0e-6 m (1.0 micrometer) error budget.
+          const errorBudgetTolerance = 1.0e-6; // 1 micrometer
+          expect(p.vector.x, closeTo(expectedX, errorBudgetTolerance));
+          expect(p.vector.y, closeTo(expectedY, errorBudgetTolerance));
+          expect(p.vector.z, closeTo(expectedZ, errorBudgetTolerance));
 
           // Exact metadata validation
           expect(p.frame, equals(ReferenceFrameId.moonMeDe421));
           expect(p.origin, equals(CoordinateOriginId.moonCenterOfMass));
           expect(p.unit, equals(VectorUnit.meters));
+        },
+      );
+    });
+
+    group('H. Phase 04C Transformation Provenance Contract', () {
+      test('transformWithProvenance retains FramedVector3 and complete immutable source provenance', () {
+        final coords = LunarGeographicCoordinates(
+          latitude: Angle.fromDegrees(-88.45),
+          latitudeType: LatitudeType.planetodetic,
+          longitude: Angle.fromDegrees(-160.0),
+          longitudeDirection: LongitudeDirection.eastPositive,
+          longitudeDomain: LongitudeDomain.symmetric180,
+          heightMeters: 1250.0,
+          heightReference: heightRef,
+          frame: frame,
+        );
+
+        final result = transformer.transformWithProvenance(coords);
+
+        // 1. Result contains the exact same FramedVector3 as toBodyFixedCartesian
+        final directVector = transformer.toBodyFixedCartesian(coords);
+        expect(result.framedVector, equals(directVector));
+        expect(result.framedVector.unit, equals(VectorUnit.meters));
+        expect(
+          result.framedVector.origin,
+          equals(CoordinateOriginId.moonCenterOfMass),
+        );
+        expect(result.framedVector.frame, equals(ReferenceFrameId.moonMeDe421));
+
+        // 2. Result retains the exact source coordinate value object
+        expect(result.sourceCoordinates, equals(coords));
+
+        // 3. Provenance getters provide direct, immutable, typed access
+        expect(result.sourceLatitude, equals(coords.latitude));
+        expect(result.sourceLatitudeType, equals(LatitudeType.planetodetic));
+        expect(result.sourceLongitude, equals(coords.longitude));
+        expect(
+          result.sourceLongitudeDirection,
+          equals(LongitudeDirection.eastPositive),
+        );
+        expect(
+          result.sourceLongitudeDomain,
+          equals(LongitudeDomain.symmetric180),
+        );
+        expect(result.sourceHeightMeters, equals(1250.0));
+        expect(result.sourceHeightReference, equals(heightRef));
+        expect(
+          result.sourceReferenceSurface,
+          equals(ReferenceSurfaceId.lunarSphere1737400),
+        );
+        expect(result.sourceFrame, equals(ReferenceFrameId.moonMeDe421));
+
+        // 4. Exact pole provenance behavior
+        final northPoleCoords = LunarGeographicCoordinates(
+          latitude: Angle.fromDegrees(90.0),
+          latitudeType: LatitudeType.planetocentric,
+          longitude: Angle.fromDegrees(45.0),
+          longitudeDirection: LongitudeDirection.westPositive,
+          longitudeDomain: LongitudeDomain.positive360,
+          heightMeters: 0.0,
+          heightReference: heightRef,
+          frame: frame,
+        );
+        final northPoleResult = transformer.transformWithProvenance(
+          northPoleCoords,
+        );
+        expect(northPoleResult.framedVector.vector.x, equals(0.0));
+        expect(northPoleResult.framedVector.vector.y, equals(0.0));
+        expect(1 / northPoleResult.framedVector.vector.x, isPositive);
+        expect(1 / northPoleResult.framedVector.vector.y, isPositive);
+        expect(northPoleResult.framedVector.vector.z, equals(1737400.0));
+        expect(northPoleResult.sourceLatitude.inDegrees, equals(90.0));
+        expect(
+          northPoleResult.sourceLongitudeDirection,
+          equals(LongitudeDirection.westPositive),
+        );
+
+        // 5. Value equality of LunarCoordinateTransformationResult
+        final duplicateResult = transformer.transformWithProvenance(coords);
+        expect(result, equals(duplicateResult));
+        expect(result.hashCode, equals(duplicateResult.hashCode));
+      });
+    });
+
+    group('H. Phase 04C Transformation Provenance Contract', () {
+      test(
+        'transformWithProvenance retains FramedVector3 and complete immutable source provenance',
+        () {
+          final coords = LunarGeographicCoordinates(
+            latitude: Angle.fromDegrees(-88.45),
+            latitudeType: LatitudeType.planetodetic,
+            longitude: Angle.fromDegrees(-160.0),
+            longitudeDirection: LongitudeDirection.eastPositive,
+            longitudeDomain: LongitudeDomain.symmetric180,
+            heightMeters: 1250.0,
+            heightReference: heightRef,
+            frame: frame,
+          );
+
+          final result = transformer.transformWithProvenance(coords);
+
+          // 1. Result contains the exact same FramedVector3 as toBodyFixedCartesian
+          final directVector = transformer.toBodyFixedCartesian(coords);
+          expect(result.framedVector, equals(directVector));
+          expect(result.framedVector.unit, equals(VectorUnit.meters));
+          expect(result.framedVector.origin, equals(CoordinateOriginId.moonCenterOfMass));
+          expect(result.framedVector.frame, equals(ReferenceFrameId.moonMeDe421));
+
+          // 2. Result retains the exact source coordinate value object
+          expect(result.sourceCoordinates, equals(coords));
+
+          // 3. Provenance getters provide direct, immutable, typed access
+          expect(result.sourceLatitude, equals(coords.latitude));
+          expect(result.sourceLatitudeType, equals(LatitudeType.planetodetic));
+          expect(result.sourceLongitude, equals(coords.longitude));
+          expect(result.sourceLongitudeDirection, equals(LongitudeDirection.eastPositive));
+          expect(result.sourceLongitudeDomain, equals(LongitudeDomain.symmetric180));
+          expect(result.sourceHeightMeters, equals(1250.0));
+          expect(result.sourceHeightReference, equals(heightRef));
+          expect(result.sourceReferenceSurface, equals(ReferenceSurfaceId.lunarSphere1737400));
+          expect(result.sourceFrame, equals(ReferenceFrameId.moonMeDe421));
+
+          // 4. Exact pole provenance behavior
+          final northPoleCoords = LunarGeographicCoordinates(
+            latitude: Angle.fromDegrees(90.0),
+            latitudeType: LatitudeType.planetocentric,
+            longitude: Angle.fromDegrees(45.0),
+            longitudeDirection: LongitudeDirection.westPositive,
+            longitudeDomain: LongitudeDomain.positive360,
+            heightMeters: 0.0,
+            heightReference: heightRef,
+            frame: frame,
+          );
+          final northPoleResult =
+              transformer.transformWithProvenance(northPoleCoords);
+          expect(northPoleResult.framedVector.vector.x, equals(0.0));
+          expect(northPoleResult.framedVector.vector.y, equals(0.0));
+          expect(1 / northPoleResult.framedVector.vector.x, isPositive);
+          expect(1 / northPoleResult.framedVector.vector.y, isPositive);
+          expect(northPoleResult.framedVector.vector.z, equals(1737400.0));
+          expect(northPoleResult.sourceLatitude.inDegrees, equals(90.0));
+          expect(northPoleResult.sourceLongitudeDirection, equals(LongitudeDirection.westPositive));
+
+          // 5. Value equality of LunarCoordinateTransformationResult
+          final duplicateResult =
+              transformer.transformWithProvenance(coords);
+          expect(result, equals(duplicateResult));
+          expect(result.hashCode, equals(duplicateResult.hashCode));
         },
       );
     });

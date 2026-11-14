@@ -2,6 +2,7 @@
 library;
 
 export 'domain/coordinates/coordinate_conventions.dart';
+export 'domain/coordinates/lunar_coordinate_transformation_result.dart';
 export 'domain/coordinates/lunar_coordinate_transformer.dart';
 export 'domain/coordinates/lunar_geographic_coordinates.dart';
 export 'domain/coordinates/reference_surface_id.dart';

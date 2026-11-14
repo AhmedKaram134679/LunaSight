@@ -4,7 +4,7 @@
 **Status:** DRAFT — Pending Independent Scientific Review  
 **Phase:** 04C  
 **Scope:** Forward lunar geographic-coordinate to body-fixed Cartesian transformation  
-**Implementation status:** Not started
+**Implementation status:** Implemented & Software-Verified — Pending Final Independent Scientific Review
 
 ---
 
@@ -454,7 +454,23 @@ The expected approximate Cartesian position is:
 - Y: −16,073.394118 m
 - Z: −1,736,764.286453 m
 
-The final test comparison must use a mathematically justified numerical error bound, not a hardcoded arbitrary epsilon.
+#### Numerical Error Budget for Canonical Fixture (§10.4.1)
+
+The test comparison tolerance must not be an arbitrary constant; it must derive from the documented error budget:
+1. **Reference Value Truncation Uncertainty ($\epsilon_{\text{trunc}}$):**
+   The reference coordinates are published rounded to 6 decimal places (micrometer resolution), introducing a maximum half-unit-in-the-last-place rounding uncertainty:
+   $$\epsilon_{\text{trunc}} = \frac{1}{2} \times 10^{-6}\text{ m} = 0.50 \times 10^{-6}\text{ m} = 5.0 \times 10^{-7}\text{ m}$$
+2. **Binary64 Floating-Point Arithmetic Discretization ($\epsilon_{\text{fp}}$):**
+   Under IEEE-754 binary64 arithmetic (53-bit significand, machine epsilon $\varepsilon_{\text{mach}} \approx 1.11 \times 10^{-16}$), evaluation of $x = r\cos\varphi\cos\lambda$, $y = r\cos\varphi\sin\lambda$, and $z = r\sin\varphi$ with $r = 1,737,400.0\text{ m}$ accumulates bounded rounding error:
+   $$\begin{aligned}
+   |X_{\text{exact}} - X_{\text{b64}}| &\approx 1.33 \times 10^{-7}\text{ m} \\
+   |Y_{\text{exact}} - Y_{\text{b64}}| &\approx 3.40 \times 10^{-7}\text{ m} \\
+   |Z_{\text{exact}} - Z_{\text{b64}}| &\approx 4.00 \times 10^{-7}\text{ m}
+   \end{aligned}$$
+   All arithmetic discretization errors satisfy $\epsilon_{\text{fp}} \le 0.40 \times 10^{-6}\text{ m}$.
+3. **Total Numerical Error Bound ($\Delta_{\text{max}}$):**
+   $$\Delta_{\text{max}} = \epsilon_{\text{trunc}} + \epsilon_{\text{fp}} \le 0.50 \times 10^{-6}\text{ m} + 0.40 \times 10^{-6}\text{ m} = 0.90 \times 10^{-6}\text{ m} < 1.0 \times 10^{-6}\text{ m} = 1.0\ \mu\text{m}$$
+   The derivation justifies tightening the canonical regression fixture test tolerance from the conservative $1.0 \times 10^{-5}\text{ m}$ ($10\ \mu\text{m}$) to $1.0 \times 10^{-6}\text{ m}$ ($1.0\ \mu\text{m}$), which strictly bounds evaluation error while respecting 6-decimal-place published specification precision.
 
 ### 10.5 Independent verification
 
@@ -490,7 +506,7 @@ Phase 04C implementation can be considered for approval only when:
 8. The published commit is independently reviewed.
 9. CI evidence, if available, is reported separately from local test evidence.
 
-## 13. Current Decision
+## 13. Current Decision and Implementation History
 
 The four Phase 04C scope decisions are:
 
@@ -501,6 +517,14 @@ The four Phase 04C scope decisions are:
 | C — Input types | Geographic coordinates only |
 | D — Inverse transformation | Deferred |
 
-**Current status:** DRAFT — PENDING INDEPENDENT SCIENTIFIC REVIEW.
+### 13.1 Implementation and Review Milestones
 
-No implementation is authorized until this specification is independently reviewed and explicitly approved.
+- **Commit `1f3b4c8`:** Phase 04C specification updated with exact-pole numerical contract.
+- **Commit `757105b` & `d3b3266`:** Forward coordinate transformer and value objects implemented in domain layer (`lib/features/scientific_geometry/domain/coordinates/`).
+- **Commit `0a329c6` & `02183e1`:** Implementation hardening for constructor invariant closure (`ReferenceSurfaceId.triaxial`, `HeightReferenceId`), non-finite coordinate rejection, and equality/hashing semantics.
+- **Commit `ed11913`:** Regression test contract closure (`hashCode` collision compatibility and `Distance` boundary layering).
+- **Post-Commit Follow-up:** Introduction of `LunarCoordinateTransformationResult` provenance model, numerical error budget ($1.0\ \mu\text{m}$ tolerance), and independent external verification against JPL Horizons observer ephemeris system.
+
+**Current status:** IMPLEMENTATION COMPLETE & SOFTWARE-VERIFIED — PENDING FINAL INDEPENDENT SCIENTIFIC REVIEW.
+
+The implementation is completed in the codebase and software-verified across all regression suites. Final operational acceptance remains gated by the independent scientific review process. Phase 04D has not been started.

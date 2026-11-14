@@ -192,6 +192,9 @@ class LunarGeographicCoordinates {
   double get effectiveRadiusMeters =>
       heightReference.referenceSurface.equatorialRadius.meters + heightMeters;
 
+  /// The reference surface associated with [heightReference].
+  ReferenceSurfaceId get referenceSurface => heightReference.referenceSurface;
+
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||

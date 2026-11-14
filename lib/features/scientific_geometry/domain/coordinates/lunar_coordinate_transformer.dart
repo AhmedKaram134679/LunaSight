@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:luna_sight/features/scientific_geometry/domain/coordinates/lunar_coordinate_transformation_result.dart';
 import 'package:luna_sight/features/scientific_geometry/domain/coordinates/lunar_geographic_coordinates.dart';
 import 'package:luna_sight/features/scientific_geometry/domain/failures/scientific_computation_exception.dart';
 import 'package:luna_sight/features/scientific_geometry/domain/value_objects/coordinate_origin_id.dart';
@@ -19,6 +20,7 @@ import 'package:luna_sight/features/scientific_geometry/domain/value_objects/vec
 /// - No pole snapping or artificial clamping for non-polar coordinates
 /// - Strict validation and rejection of non-finite results or arithmetic overflow
 /// - Output encapsulation in [FramedVector3] preserving frame identity (`MOON_ME_DE421`), lunar center of mass origin, and meter units
+/// - Full diagnostic traceability via [transformWithProvenance] yielding [LunarCoordinateTransformationResult]
 class LunarCoordinateTransformer {
   const LunarCoordinateTransformer();
 
@@ -103,6 +105,18 @@ class LunarCoordinateTransformer {
       frame: coords.frame,
       origin: CoordinateOriginId.moonCenterOfMass,
       unit: VectorUnit.meters,
+    );
+  }
+
+  /// Transforms [coords] into a [LunarCoordinateTransformationResult] pairing the Cartesian
+  /// position [FramedVector3] with its complete source-coordinate provenance and reference geometry.
+  LunarCoordinateTransformationResult transformWithProvenance(
+    LunarGeographicCoordinates coords,
+  ) {
+    final framed = toBodyFixedCartesian(coords);
+    return LunarCoordinateTransformationResult(
+      framedVector: framed,
+      sourceCoordinates: coords,
     );
   }
 }
