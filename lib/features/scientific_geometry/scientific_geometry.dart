@@ -1,6 +1,10 @@
-/// Domain exports for the LunaSight Scientific Geometry Engine (Phase 04B).
+/// Domain exports for the LunaSight Scientific Geometry Engine.
 library;
 
+export 'domain/coordinates/coordinate_conventions.dart';
+export 'domain/coordinates/lunar_coordinate_transformer.dart';
+export 'domain/coordinates/lunar_geographic_coordinates.dart';
+export 'domain/coordinates/reference_surface_id.dart';
 export 'domain/failures/scientific_computation_exception.dart';
 export 'domain/quantities/angle.dart';
 export 'domain/quantities/distance.dart';
