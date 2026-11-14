@@ -196,7 +196,11 @@ For the initial Phase 04B implementation, operations employ direct IEEE-754 bina
 
 ##### The Mathematical Failure Modes of Naive Sum-of-Squares
 A naive Euclidean magnitude calculation $\|\vec{v}\| = \sqrt{x^2 + y^2 + z^2}$ suffers from two severe IEEE-754 binary64 limitations:
-1. **Squaring Overflow:** The maximum representable finite binary64 float is $\Omega \approx 1.7976931348623157 \times 10^{308}$. If any component exceeds $\sqrt{\Omega / 3} \approx 7.74 \times 10^{153}$, squaring that component results in $+\infty$. The subsequent sum and square root evaluate to $+\infty$, causing an arithmetic failure even though the actual mathematical magnitude $\sqrt{x^2 + y^2 + z^2}$ is well within representable floating-point bounds.
+1. **Squaring and Sum Overflow:**
+   The maximum representable finite binary64 float is $\Omega \approx 1.7976931348623157 \times 10^{308}$. Naive direct squaring and summation can fail through two distinct mechanisms:
+   - *Individual Square Overflow:* An individual component square exceeds the finite binary64 range when its absolute magnitude is sufficiently large, approximately around the square-root boundary $\sqrt{\Omega} \approx 1.34078 \times 10^{154}$. When $|x| \gtrsim \sqrt{\Omega}$, computing $x^2$ directly produces $+\infty$ under IEEE-754 round-to-nearest semantics, causing the subsequent sum and square root to evaluate to $+\infty$. (Note that $\sqrt{\Omega}$ is an approximate continuous mathematical boundary; exact floating-point overflow depends on operand bit representation and IEEE-754 rounding).
+   - *Sum-of-Squares Overflow:* Even when each individual component square is finite (e.g. all $|x|, |y|, |z| < \sqrt{\Omega}$), the addition $x^2 + y^2 + z^2$ can overflow to $+\infty$ if their combined sum exceeds $\Omega$.
+   In both cases, naive magnitude calculation fails prematurely with $+\infty$ even though the true mathematical Euclidean magnitude $\sqrt{x^2 + y^2 + z^2}$ may be well within the representable finite binary64 range (e.g., for $\vec{v} = (10^{200}, 10^{200}, 10^{200})^T$, true magnitude is $\sqrt{3} \times 10^{200} \ll \Omega$, but naive squaring fails immediately).
 2. **Squaring Underflow and the Underflow-to-Zero Boundary:**
    - The smallest positive **normal** binary64 float is $2^{-1022} \approx 2.2250738585072014 \times 10^{-308}$.
    - The smallest positive **subnormal** binary64 float is $2^{-1074} \approx 4.9406564584124654 \times 10^{-324}$.
@@ -459,9 +463,10 @@ Floating-point comparisons must never use exact equality (`==`), except when che
 | `Vector3` | Cross Product Intermediate Overflow | $(10^{200}, 0, 0) \times (0, 10^{200}, 0)$ | Throws `ScientificComputationException(code: 'ARITHMETIC_OVERFLOW')` |
 | `Vector3` | Scaled Magnitude (Large) | $(10^{200}, 10^{200}, 10^{200})$ | $\sqrt{3} \times 10^{200}$ (naive would overflow to $+\infty$) |
 | `Vector3` | Scaled Magnitude (Small) | $(10^{-200}, 10^{-200}, 10^{-200})$ | $\sqrt{3} \times 10^{-200}$ (naive would underflow to $0.0$) |
+| `Vector3` | Scaled Magnitude (Near-Limit Finite) | $(1.0 \times 10^{308}, 1.0 \times 10^{308}, 1.0 \times 10^{308})$ | $\sqrt{3} \times 10^{308} \approx 1.73205 \times 10^{308} < \Omega$; returns finite result |
 | `Vector3` | Scaled Normalization | $(0, 3 \times 10^{250}, 4 \times 10^{250})$ | $(0, 0.6, 0.8)$ with unit magnitude within $\epsilon_{\text{norm}}$ |
 | `Vector3` | Zero Vector Normalization | $(0.0, 0.0, 0.0)$ | Throws `ScientificComputationException(code: 'ZERO_VECTOR_NORMALIZATION')` |
-| `Vector3` | Magnitude Overflow | $(10^{308}, 10^{308}, 10^{308})$ | Throws `ScientificComputationException(code: 'MAGNITUDE_OVERFLOW')` |
+| `Vector3` | Magnitude Overflow | $(1.1 \times 10^{308}, 1.1 \times 10^{308}, 1.1 \times 10^{308})$ | Mathematical magnitude $\approx 1.90526 \times 10^{308} > \Omega$; throws `MAGNITUDE_OVERFLOW` |
 | `ReferenceFrameId` | Identity Separation | `moonMeDe421` vs `moonMeDe440`, `icrf` vs `j2000` | Not equal (`operator ==` returns false) |
 | `CoordinateOriginId` | Origin Separation | `moonCenterOfMass` vs `topocentricSite('shackleton')` | Not equal (`operator ==` returns false) |
 | `FramedVector3` | Valid Unit Conversion | $(1000, 2000, 3000)\text{ m} \to \text{km}$ | $(1, 2, 3)\text{ km}$, identical frame and origin |
