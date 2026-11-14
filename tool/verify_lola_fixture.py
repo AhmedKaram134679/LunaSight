@@ -76,11 +76,16 @@ TIFF_TYPE_SIZES = {
 def decode_predictor3_deflate(compressed_bytes: bytes) -> bytes:
     """
     Decompresses Deflate stream and undifferences TIFF Predictor 3 horizontal byte-differencing.
-    Predictor 3 separates each 4-byte Float32 into 4 planar bytes per scanline:
-    Scanline length = 256 * 4 = 1024 bytes.
-    Byte planes = 4 (plane 0: MSB, plane 1: byte 2, plane 2: byte 1, plane 3: LSB).
-    Each plane has 256 bytes.
-    Bytes within each plane are horizontally differenced: b[i] = (b[i] + b[i-1]) mod 256.
+    Under TIFF Technical Note 3 / libtiff standard for floating point prediction (Predictor=3):
+    1. For Float32 (4 bytes per sample), samples are split into 4 byte planes across the scanline
+       (scanline length = 256 * 4 = 1024 bytes).
+    2. Differencing is applied continuously across the entire scanline buffer:
+       undiff[0] = row[0]
+       undiff[b] = (undiff[b - 1] + row[b]) & 0xFF  (for b = 1 .. row_bytes - 1)
+    3. Samples are re-interleaved from the 4 planes:
+       plane 0 is at offset 0 * width, plane 1 at 1 * width, plane 2 at 2 * width, plane 3 at 3 * width.
+       Output Little-Endian Float32 bytes: [plane3, plane2, plane1, plane0].
+    This matches the authoritative libtiff implementation (verified via Pillow / libtiff oracle).
     """
     raw = zlib.decompress(compressed_bytes)
     if len(raw) != EXPECTED_DECOMPRESSED_SIZE:
@@ -93,24 +98,25 @@ def decode_predictor3_deflate(compressed_bytes: bytes) -> bytes:
 
     for row in range(TILE_HEIGHT):
         row_offset = row * row_bytes
-        plane_size = TILE_WIDTH
+        row_in = raw[row_offset : row_offset + row_bytes]
 
-        planes = []
-        for p in range(BYTES_PER_SAMPLE):
-            plane_start = row_offset + p * plane_size
-            plane = bytearray(raw[plane_start : plane_start + plane_size])
-            # Undo horizontal differencing
-            for col in range(1, plane_size):
-                plane[col] = (plane[col] + plane[col - 1]) & 0xFF
-            planes.append(plane)
+        # Continuous horizontal undifferencing across the scanline buffer
+        undiff = bytearray(row_bytes)
+        for b in range(row_bytes):
+            if b == 0:
+                undiff[b] = row_in[b]
+            else:
+                undiff[b] = (undiff[b - 1] + row_in[b]) & 0xFF
 
-        # Reinterleave planes (MSB to LSB -> little-endian float)
-        for col in range(TILE_WIDTH):
-            out_offset = row_offset + col * BYTES_PER_SAMPLE
-            decoded[out_offset + 0] = planes[3][col]
-            decoded[out_offset + 1] = planes[2][col]
-            decoded[out_offset + 2] = planes[1][col]
-            decoded[out_offset + 3] = planes[0][col]
+        # Re-interleave planes into Little-Endian Float32
+        row_out = bytearray(row_bytes)
+        for i in range(TILE_WIDTH):
+            row_out[i * 4 + 0] = undiff[3 * TILE_WIDTH + i]
+            row_out[i * 4 + 1] = undiff[2 * TILE_WIDTH + i]
+            row_out[i * 4 + 2] = undiff[1 * TILE_WIDTH + i]
+            row_out[i * 4 + 3] = undiff[0 * TILE_WIDTH + i]
+
+        decoded[row_offset : row_offset + row_bytes] = row_out
 
     return bytes(decoded)
 

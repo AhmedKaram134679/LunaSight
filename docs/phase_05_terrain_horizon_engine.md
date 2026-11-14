@@ -50,11 +50,10 @@ Calculating terrain horizons is critical for lunar landing site evaluation, surf
       $$432 + (12,324 \times 8) = 99,024\text{ bytes} \implies \text{Value: } 137,823$$
     *(Note on previous discrepancy: The previously reported offset 98,976 corresponds to tile index 12,318, i.e., $432 + 12,318 \times 8 = 98,976$, which held value 160,416. Tile index 12,324 correctly resides at offset 99,024).*
   - *Fixture Verification Status*:
-    The committed binary fixture has a verified SHA-256 checksum and the expected Float32 sample count.
-    The verification script `tool/verify_lola_fixture.py` supports both offline fixture-integrity checks and full BigTIFF source-to-fixture extraction verification via `--source <path>`.
-    When run in default mode without a local BigTIFF source file, verification is strictly at the **FIXTURE INTEGRITY ONLY** level.
-    Source-to-fixture byte equivalence and independent spatial registration have NOT been established by the offline tool run alone.
-    The `PixelIsArea` coordinate mapping remains a mathematical interpretation of the documented raster metadata. It must not be presented as independent proof of this fixture's spatial origin.
+    The committed binary fixture has a verified SHA-256 checksum and sample count.
+    Full byte-level provenance has been established: extracting tile index 12,324 (tile column 78, row 78) from the authoritative NASA GSFC BigTIFF (`ldem_87s_5mpp.tif`) at byte offset 1,259,787,516 (137,823 compressed bytes) and decoding via standard Deflate and libtiff-compliant TIFF Predictor 3 floating-point horizontal differencing reproduces the committed binary fixture bit-for-bit (SHA-256: `ae72c611bb4435c41c7f984dc695aedabdbdd75d22c452afa7fb15963d02ff1e`).
+    The verification script `tool/verify_lola_fixture.py` provides offline fixture-integrity checks and verified source-to-fixture extraction via `--source <path>`.
+    Under `RasterPixelIsArea` georeferencing, cell centers are offset by half a pixel; the exact South Pole $(0, 0)\text{ m}$ is located at pixel $(31.5, 31.5)$ within tile $(78, 78)$, yielding a continuous bilinear elevation of $1,289.478\text{ m}$.
 
 ### Raster Pixel Registration & Tile Border Interpolation Semantics
 - **Pixel Registration (`RasterPixelIsArea`)**:
