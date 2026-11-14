@@ -1,6 +1,6 @@
 import 'dart:math' as math;
 
-import 'package:flutter/foundation.dart';
+import 'package:meta/meta.dart';
 import 'package:luna_sight/features/scientific_geometry/domain/failures/scientific_computation_exception.dart';
 
 /// Immutable representation of a planar angle with double-precision floating-point arithmetic.
@@ -22,7 +22,7 @@ class Angle implements Comparable<Angle> {
       throw ScientificComputationException(
         message: 'Angle radians must be finite. Got: $radians',
         code: 'NON_FINITE_VALUE',
-        context: {'radians': radians},
+        context: {'input_state': radians.isNaN ? 'NaN' : 'infinity'},
       );
     }
   }
@@ -36,7 +36,7 @@ class Angle implements Comparable<Angle> {
       throw ScientificComputationException(
         message: 'Angle degrees must be finite. Got: $degrees',
         code: 'NON_FINITE_VALUE',
-        context: {'degrees': degrees},
+        context: {'input_state': degrees.isNaN ? 'NaN' : 'infinity'},
       );
     }
     final rad = degrees * (math.pi / 180.0);
@@ -45,7 +45,10 @@ class Angle implements Comparable<Angle> {
         message:
             'Angle radians computed from degrees must be finite. Got: $rad',
         code: 'NON_FINITE_VALUE',
-        context: {'degrees': degrees, 'radians': rad},
+        context: {
+          'degrees': degrees,
+          'result_state': rad.isNaN ? 'NaN' : 'infinity',
+        },
       );
     }
     return Angle.fromRadians(rad);
@@ -64,7 +67,7 @@ class Angle implements Comparable<Angle> {
         message:
             'Angle conversion to degrees overflowed finite binary64 range.',
         code: 'ARITHMETIC_OVERFLOW',
-        context: {'radians': radians, 'degrees': deg},
+        context: {'radians': radians, 'operation': 'inDegrees'},
       );
     }
     return deg;
@@ -112,7 +115,10 @@ class Angle implements Comparable<Angle> {
       throw ScientificComputationException(
         message: 'Scalar multiplier must be finite. Got: $scalar',
         code: 'NON_FINITE_VALUE',
-        context: {'scalar': scalar, 'radians': radians},
+        context: {
+          'radians': radians,
+          'scalar_state': scalar.isNaN ? 'NaN' : 'infinity',
+        },
       );
     }
     final res = radians * scalar;
@@ -135,7 +141,10 @@ class Angle implements Comparable<Angle> {
       throw ScientificComputationException(
         message: 'Scalar divisor must be finite. Got: $scalar',
         code: 'NON_FINITE_VALUE',
-        context: {'scalar': scalar, 'radians': radians},
+        context: {
+          'radians': radians,
+          'divisor_state': scalar.isNaN ? 'NaN' : 'infinity',
+        },
       );
     }
     if (scalar == 0.0 || scalar == -0.0) {

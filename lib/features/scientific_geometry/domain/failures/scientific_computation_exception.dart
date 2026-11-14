@@ -1,4 +1,4 @@
-import 'package:flutter/foundation.dart';
+import 'package:meta/meta.dart';
 
 /// Exception thrown when a scientific or geometric computation encounters an
 /// invalid state, non-finite value, or domain failure.
@@ -28,12 +28,16 @@ class ScientificComputationException implements Exception {
     final copy = <String, Object?>{};
     for (final entry in raw.entries) {
       final value = entry.value;
-      if (value == null || value is num || value is String || value is bool) {
+      if (value == null ||
+          value is int ||
+          (value is double && value.isFinite) ||
+          value is String ||
+          value is bool) {
         copy[entry.key] = value;
       } else {
         throw ArgumentError(
           'ScientificComputationException context only supports immutable primitives '
-          '(String, int, double, bool, null). Got ${value.runtimeType} for key "${entry.key}".',
+          '(String, int, finite double, bool, null). Got ${value.runtimeType} ($value) for key "${entry.key}".',
         );
       }
     }
@@ -57,11 +61,11 @@ class ScientificComputationException implements Exception {
 
   @override
   int get hashCode {
-    var result = Object.hash(message, code);
+    var contextHash = 0;
     for (final entry in context.entries) {
-      result = Object.hash(result, entry.key, entry.value);
+      contextHash ^= Object.hash(entry.key, entry.value);
     }
-    return result;
+    return Object.hash(message, code, contextHash);
   }
 
   @override

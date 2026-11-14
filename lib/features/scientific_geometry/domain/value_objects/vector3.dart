@@ -1,6 +1,6 @@
 import 'dart:math' as math;
 
-import 'package:flutter/foundation.dart';
+import 'package:meta/meta.dart';
 import 'package:luna_sight/features/scientific_geometry/domain/failures/scientific_computation_exception.dart';
 
 /// Immutable, unit-neutral three-dimensional Cartesian vector.
@@ -32,7 +32,11 @@ class Vector3 {
         message:
             'Vector3 components must be finite numeric values. Got: ($x, $y, $z)',
         code: 'NON_FINITE_VALUE',
-        context: {'x': x, 'y': y, 'z': z},
+        context: {
+          if (x.isFinite) 'x': x else 'x_state': x.isNaN ? 'NaN' : 'infinity',
+          if (y.isFinite) 'y': y else 'y_state': y.isNaN ? 'NaN' : 'infinity',
+          if (z.isFinite) 'z': z else 'z_state': z.isNaN ? 'NaN' : 'infinity',
+        },
       );
     }
   }
@@ -139,6 +143,7 @@ class Vector3 {
           'rhs_x': other.x,
           'rhs_y': other.y,
           'rhs_z': other.z,
+          'overflow_component': !rx.isFinite ? 'x' : (!ry.isFinite ? 'y' : 'z'),
         },
       );
     }
@@ -165,6 +170,7 @@ class Vector3 {
           'rhs_x': other.x,
           'rhs_y': other.y,
           'rhs_z': other.z,
+          'overflow_component': !rx.isFinite ? 'x' : (!ry.isFinite ? 'y' : 'z'),
         },
       );
     }
@@ -184,7 +190,12 @@ class Vector3 {
       throw ScientificComputationException(
         message: 'Scalar multiplier must be finite. Got: $scalar',
         code: 'NON_FINITE_VALUE',
-        context: {'scalar': scalar, 'x': x, 'y': y, 'z': z},
+        context: {
+          'x': x,
+          'y': y,
+          'z': z,
+          'scalar_state': scalar.isNaN ? 'NaN' : 'infinity',
+        },
       );
     }
 
@@ -197,7 +208,15 @@ class Vector3 {
         message:
             'Vector3 scalar multiplication overflowed finite binary64 range.',
         code: 'ARITHMETIC_OVERFLOW',
-        context: {'scalar': scalar, 'rx': rx, 'ry': ry, 'rz': rz},
+        context: {
+          'scalar': scalar,
+          'x': x,
+          'y': y,
+          'z': z,
+          'overflow_component': !rx.isFinite
+              ? 'rx'
+              : (!ry.isFinite ? 'ry' : 'rz'),
+        },
       );
     }
 
@@ -213,7 +232,12 @@ class Vector3 {
       throw ScientificComputationException(
         message: 'Scalar divisor must be finite. Got: $scalar',
         code: 'NON_FINITE_VALUE',
-        context: {'scalar': scalar, 'x': x, 'y': y, 'z': z},
+        context: {
+          'x': x,
+          'y': y,
+          'z': z,
+          'divisor_state': scalar.isNaN ? 'NaN' : 'infinity',
+        },
       );
     }
     if (scalar == 0.0 || scalar == -0.0) {
@@ -232,7 +256,15 @@ class Vector3 {
       throw ScientificComputationException(
         message: 'Vector3 scalar division overflowed finite binary64 range.',
         code: 'ARITHMETIC_OVERFLOW',
-        context: {'scalar': scalar, 'rx': rx, 'ry': ry, 'rz': rz},
+        context: {
+          'scalar': scalar,
+          'x': x,
+          'y': y,
+          'z': z,
+          'overflow_component': !rx.isFinite
+              ? 'rx'
+              : (!ry.isFinite ? 'ry' : 'rz'),
+        },
       );
     }
 
@@ -253,15 +285,15 @@ class Vector3 {
         message: 'Vector3 dot product intermediate multiplication overflowed finite binary64 range.',
         code: 'ARITHMETIC_OVERFLOW',
         context: {
-          'px': px,
-          'py': py,
-          'pz': pz,
           'lhs_x': x,
           'lhs_y': y,
           'lhs_z': z,
           'rhs_x': other.x,
           'rhs_y': other.y,
           'rhs_z': other.z,
+          'overflow_component': !px.isFinite
+              ? 'px'
+              : (!py.isFinite ? 'py' : 'pz'),
         },
       );
     }
@@ -272,7 +304,7 @@ class Vector3 {
         message:
             'Vector3 dot product summation overflowed finite binary64 range.',
         code: 'ARITHMETIC_OVERFLOW',
-        context: {'px': px, 'py': py, 'pz': pz, 'sum': sum},
+        context: {'px': px, 'py': py, 'pz': pz, 'operation': 'dot_summation'},
       );
     }
 
@@ -291,7 +323,14 @@ class Vector3 {
       throw ScientificComputationException(
         message: 'Vector3 cross product X-component multiplication overflowed finite binary64 range.',
         code: 'ARITHMETIC_OVERFLOW',
-        context: {'p1x': p1x, 'p2x': p2x},
+        context: {
+          'component': 'x',
+          'y': y,
+          'rhs_z': other.z,
+          'z': z,
+          'rhs_y': other.y,
+          'overflow_product': !p1x.isFinite ? 'p1x' : 'p2x',
+        },
       );
     }
     final rx = p1x - p2x;
@@ -302,7 +341,14 @@ class Vector3 {
       throw ScientificComputationException(
         message: 'Vector3 cross product Y-component multiplication overflowed finite binary64 range.',
         code: 'ARITHMETIC_OVERFLOW',
-        context: {'p1y': p1y, 'p2y': p2y},
+        context: {
+          'component': 'y',
+          'z': z,
+          'rhs_x': other.x,
+          'x': x,
+          'rhs_z': other.z,
+          'overflow_product': !p1y.isFinite ? 'p1y' : 'p2y',
+        },
       );
     }
     final ry = p1y - p2y;
@@ -313,7 +359,14 @@ class Vector3 {
       throw ScientificComputationException(
         message: 'Vector3 cross product Z-component multiplication overflowed finite binary64 range.',
         code: 'ARITHMETIC_OVERFLOW',
-        context: {'p1z': p1z, 'p2z': p2z},
+        context: {
+          'component': 'z',
+          'x': x,
+          'rhs_y': other.y,
+          'y': y,
+          'rhs_x': other.x,
+          'overflow_product': !p1z.isFinite ? 'p1z' : 'p2z',
+        },
       );
     }
     final rz = p1z - p2z;
@@ -322,7 +375,17 @@ class Vector3 {
       throw ScientificComputationException(
         message: 'Vector3 cross product subtraction overflowed finite binary64 range.',
         code: 'ARITHMETIC_OVERFLOW',
-        context: {'rx': rx, 'ry': ry, 'rz': rz},
+        context: {
+          'p1x': p1x,
+          'p2x': p2x,
+          'p1y': p1y,
+          'p2y': p2y,
+          'p1z': p1z,
+          'p2z': p2z,
+          'overflow_component': !rx.isFinite
+              ? 'rx'
+              : (!ry.isFinite ? 'ry' : 'rz'),
+        },
       );
     }
 

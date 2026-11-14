@@ -1,4 +1,4 @@
-import 'package:flutter/foundation.dart';
+import 'package:meta/meta.dart';
 import 'package:luna_sight/features/scientific_geometry/domain/failures/scientific_computation_exception.dart';
 
 /// Immutable representation of a physical distance or geometric magnitude.
@@ -20,7 +20,7 @@ class Distance implements Comparable<Distance> {
       throw ScientificComputationException(
         message: 'Distance meters must be finite. Got: $meters',
         code: 'NON_FINITE_VALUE',
-        context: {'meters': meters},
+        context: {'input_state': meters.isNaN ? 'NaN' : 'infinity'},
       );
     }
     if (meters < 0.0) {
@@ -41,7 +41,7 @@ class Distance implements Comparable<Distance> {
       throw ScientificComputationException(
         message: 'Distance kilometers must be finite. Got: $kilometers',
         code: 'NON_FINITE_VALUE',
-        context: {'kilometers': kilometers},
+        context: {'input_state': kilometers.isNaN ? 'NaN' : 'infinity'},
       );
     }
     if (kilometers < 0.0) {
@@ -57,7 +57,7 @@ class Distance implements Comparable<Distance> {
         message:
             'Distance conversion to meters overflowed finite binary64 range.',
         code: 'ARITHMETIC_OVERFLOW',
-        context: {'kilometers': kilometers, 'meters': m},
+        context: {'kilometers': kilometers, 'operation': 'fromKilometers'},
       );
     }
     return Distance.fromMeters(m);
@@ -109,7 +109,10 @@ class Distance implements Comparable<Distance> {
       throw ScientificComputationException(
         message: 'Scalar multiplier must be finite. Got: $scalar',
         code: 'NON_FINITE_VALUE',
-        context: {'scalar': scalar, 'meters': meters},
+        context: {
+          'meters': meters,
+          'scalar_state': scalar.isNaN ? 'NaN' : 'infinity',
+        },
       );
     }
     if (scalar < 0.0) {
@@ -142,7 +145,10 @@ class Distance implements Comparable<Distance> {
       throw ScientificComputationException(
         message: 'Scalar divisor must be finite. Got: $scalar',
         code: 'NON_FINITE_VALUE',
-        context: {'scalar': scalar, 'meters': meters},
+        context: {
+          'meters': meters,
+          'divisor_state': scalar.isNaN ? 'NaN' : 'infinity',
+        },
       );
     }
     if (scalar == 0.0 || scalar == -0.0) {

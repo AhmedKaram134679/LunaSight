@@ -95,6 +95,52 @@ void main() {
       );
     });
 
+    test('Strictly rejects non-finite double values in context', () {
+      expect(
+        () => ScientificComputationException(
+          message: 'Test',
+          code: 'TEST',
+          context: {'nanKey': double.nan},
+        ),
+        throwsArgumentError,
+      );
+
+      expect(
+        () => ScientificComputationException(
+          message: 'Test',
+          code: 'TEST',
+          context: {'posInf': double.infinity},
+        ),
+        throwsArgumentError,
+      );
+
+      expect(
+        () => ScientificComputationException(
+          message: 'Test',
+          code: 'TEST',
+          context: {'negInf': double.negativeInfinity},
+        ),
+        throwsArgumentError,
+      );
+    });
+
+    test('Order-independent context hash code consistency regression test', () {
+      final exForward = ScientificComputationException(
+        message: 'Order test',
+        code: 'ORDER_TEST',
+        context: {'alpha': 'first', 'beta': 42, 'gamma': 3.14},
+      );
+
+      final exReversed = ScientificComputationException(
+        message: 'Order test',
+        code: 'ORDER_TEST',
+        context: {'gamma': 3.14, 'beta': 42, 'alpha': 'first'},
+      );
+
+      expect(exForward, equals(exReversed));
+      expect(exForward.hashCode, equals(exReversed.hashCode));
+    });
+
     test(
       'Equality and hashCode respect message, code, and context content',
       () {

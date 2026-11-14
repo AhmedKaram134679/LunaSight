@@ -1,4 +1,4 @@
-import 'package:flutter/foundation.dart';
+import 'package:meta/meta.dart';
 import 'package:luna_sight/features/scientific_geometry/domain/failures/scientific_computation_exception.dart';
 import 'package:luna_sight/features/scientific_geometry/domain/value_objects/coordinate_origin_id.dart';
 import 'package:luna_sight/features/scientific_geometry/domain/value_objects/reference_frame_id.dart';
