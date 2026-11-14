@@ -61,20 +61,31 @@ The implementation contract is based on the following distinctions:
 
 3. NAIF lunar frame definitions provide DE-specific realizations. The generic names `MOON_ME` and `MOON_PA` are aliases whose actual realizations depend on the loaded lunar frame kernel.
 
-4. NAIF distinguishes planetocentric coordinates from planetodetic/geodetic coordinates. Planetodetic latitude is defined relative to a reference spheroid, whereas planetocentric latitude is defined using the direction from the body's center.
+4. Coordinate terminology separation:
+   - **Planetocentric latitude:** defined by the direction of the position vector from the body's center of mass (or center of coordinate origin) to the surface point.
+   - **Planetographic latitude:** defined relative to the surface normal of a specified reference spheroid/ellipsoid. (NAIF's `pgrrec` provides a standard utility for converting planetographic coordinates to rectangular coordinates, where longitude direction conventions are tied to body rotation direction).
+   - **Planetodetic / geodetic latitude:** the specific terminology used by JPL Horizons for its `GEODETIC` surface-coordinate input mode (`COORD_TYPE = 'GEODETIC'`), defined relative to a reference model/spheroid (associated with DE421 for the Moon). NAIF's `pgrrec` documentation does not directly define the Horizons `GEODETIC` / planetodetic input convention.
 
-5. A spherical reference surface with equal radii is a special case in which the planetodetic and planetocentric latitude definitions produce the same geometric direction.
+5. A spherical reference surface with equal radii ($a = b = c = R$) is a special geometric case in which planetocentric, planetographic, and planetodetic/geodetic latitude produce the exact same geometric surface direction. However, these definitions must not be treated as interchangeable for any non-spherical reference surface.
 
 ### Authoritative references
 
-- NAIF, Lunar Frames Kernel Tutorial:  
+- NASA, A Standardized Lunar Coordinate System for the Constellation Program (Lunar Coordinate White Paper, Archinal et al., 2008 / NASA-TM-2008-215366):
+  Defines the recommended lunar planetocentric Mean Earth/Polar Axis (`MOON_ME`) convention and coordinate system definitions.
+
+- JPL, Horizons System User Manual (Giorgini et al., SSD/JPL):
+  https://ssd.jpl.nasa.gov/horizons/manual.html
+  Specifies the `GEODETIC` / planetodetic surface-coordinate input convention (`SITE_COORD`), reference ellipsoid parameters tied to DE421, and height reference semantics.
+
+- NAIF, Lunar Frames Kernel Tutorial:
   https://naif.jpl.nasa.gov/pub/naif/toolkit_docs/Tutorials/pdf/individual_docs/23_lunar-earth_pck-fk.pdf
 
-- NAIF, Frames Required Reading:  
+- NAIF, Frames Required Reading:
   https://naif.jpl.nasa.gov/pub/naif/toolkit_docs/FORTRAN/req/frames.html
 
-- NAIF, `pgrrec` — Planetographic to Rectangular Coordinates:  
+- NAIF, `pgrrec` — Planetographic to Rectangular Coordinates:
   https://naif.jpl.nasa.gov/pub/naif/toolkit_docs/C/cspice/pgrrec_c.html
+  Reference for planetographic-to-rectangular coordinate conversion only.
 
 - NAIF, `latrec` / `srfrec` and coordinate APIs:  
   https://naif.jpl.nasa.gov/pub/naif/toolkit_docs/C/info/mostused.html
@@ -194,7 +205,7 @@ The existing project regression location is retained:
 - Height: `0 km` under the explicitly selected spherical-reference-surface fixture convention
 - Frame realization for the Phase 04C regression fixture: `MOON_ME_DE421`
 
-The zero-height fixture convention is a geometric test definition relative to the Phase 04C sphere. It must not be represented as proof that an arbitrary LOLA Z value or another source's altitude uses the same vertical datum.
+This canonical regression fixture represents the project's existing Horizons-style GEODETIC/planetodetic convention evaluated under the explicitly declared spherical test datum ($R = 1,737,400\text{ m}$). It does not establish or prove that arbitrary NASA LOLA elevation products or other external data sources share this exact vertical datum.
 
 ## 6. Reference Surface Contract
 
