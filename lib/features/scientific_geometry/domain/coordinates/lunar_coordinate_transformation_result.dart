@@ -10,6 +10,9 @@ import 'package:luna_sight/features/scientific_geometry/domain/value_objects/ref
 /// transformation paired with its complete source-coordinate provenance and reference geometry.
 ///
 /// Satisfies the Phase 04C provenance contract:
+/// - Guarantees provenance integrity: instances can only be created via the controlled factory
+///   [LunarCoordinateTransformationResult.fromTransformation], ensuring that [framedVector]
+///   and [sourceCoordinates] cannot be arbitrarily or inconsistently paired.
 /// - Preserves the resulting [framedVector] ([FramedVector3]) with zero modifications to Phase 04B.
 /// - Retains full diagnostic and scientific traceability to the original [sourceCoordinates] ([LunarGeographicCoordinates]).
 /// - Exposes direct accessors for source latitude, longitude, conventions, height datum, and reference surface dimensions.
@@ -21,10 +24,34 @@ class LunarCoordinateTransformationResult {
   /// The immutable source geographic coordinates and reference datum from which [framedVector] was computed.
   final LunarGeographicCoordinates sourceCoordinates;
 
-  const LunarCoordinateTransformationResult({
+  /// Private constructor enforcing provenance integrity.
+  ///
+  /// External callers cannot independently inject arbitrary vectors and unrelated source coordinates.
+  const LunarCoordinateTransformationResult._({
     required this.framedVector,
     required this.sourceCoordinates,
   });
+
+  /// Controlled factory method creating a [LunarCoordinateTransformationResult].
+  ///
+  /// Validates that [framedVector] and [sourceCoordinates] share identical reference frame identity.
+  /// Intended for use by authorized coordinate transformation engines such as
+  /// `LunarCoordinateTransformer.transformWithProvenance`.
+  factory LunarCoordinateTransformationResult.fromTransformation({
+    required FramedVector3 framedVector,
+    required LunarGeographicCoordinates sourceCoordinates,
+  }) {
+    if (framedVector.frame != sourceCoordinates.frame) {
+      throw ArgumentError(
+        'Provenance frame mismatch: framedVector frame (${framedVector.frame.name}) '
+        'does not match sourceCoordinates frame (${sourceCoordinates.frame.name}).',
+      );
+    }
+    return LunarCoordinateTransformationResult._(
+      framedVector: framedVector,
+      sourceCoordinates: sourceCoordinates,
+    );
+  }
 
   /// The original source latitude.
   Angle get sourceLatitude => sourceCoordinates.latitude;

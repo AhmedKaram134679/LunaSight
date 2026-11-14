@@ -1543,74 +1543,34 @@ void main() {
         expect(result, equals(duplicateResult));
         expect(result.hashCode, equals(duplicateResult.hashCode));
       });
-    });
 
-    group('H. Phase 04C Transformation Provenance Contract', () {
-      test(
-        'transformWithProvenance retains FramedVector3 and complete immutable source provenance',
-        () {
-          final coords = LunarGeographicCoordinates(
-            latitude: Angle.fromDegrees(-88.45),
-            latitudeType: LatitudeType.planetodetic,
-            longitude: Angle.fromDegrees(-160.0),
-            longitudeDirection: LongitudeDirection.eastPositive,
-            longitudeDomain: LongitudeDomain.symmetric180,
-            heightMeters: 1250.0,
-            heightReference: heightRef,
-            frame: frame,
-          );
+      test('Enforces provenance integrity: prevents inconsistent construction via factory', () {
+        final coords = LunarGeographicCoordinates(
+          latitude: Angle.fromDegrees(0.0),
+          latitudeType: LatitudeType.planetocentric,
+          longitude: Angle.fromDegrees(0.0),
+          longitudeDirection: LongitudeDirection.eastPositive,
+          longitudeDomain: LongitudeDomain.symmetric180,
+          heightMeters: 0.0,
+          heightReference: heightRef,
+          frame: ReferenceFrameId.moonMeDe421,
+        );
 
-          final result = transformer.transformWithProvenance(coords);
+        final mismatchedVector = FramedVector3(
+          vector: Vector3(100.0, 200.0, 300.0),
+          frame: ReferenceFrameId.icrf, // Frame mismatch!
+          origin: CoordinateOriginId.moonCenterOfMass,
+          unit: VectorUnit.meters,
+        );
 
-          // 1. Result contains the exact same FramedVector3 as toBodyFixedCartesian
-          final directVector = transformer.toBodyFixedCartesian(coords);
-          expect(result.framedVector, equals(directVector));
-          expect(result.framedVector.unit, equals(VectorUnit.meters));
-          expect(result.framedVector.origin, equals(CoordinateOriginId.moonCenterOfMass));
-          expect(result.framedVector.frame, equals(ReferenceFrameId.moonMeDe421));
-
-          // 2. Result retains the exact source coordinate value object
-          expect(result.sourceCoordinates, equals(coords));
-
-          // 3. Provenance getters provide direct, immutable, typed access
-          expect(result.sourceLatitude, equals(coords.latitude));
-          expect(result.sourceLatitudeType, equals(LatitudeType.planetodetic));
-          expect(result.sourceLongitude, equals(coords.longitude));
-          expect(result.sourceLongitudeDirection, equals(LongitudeDirection.eastPositive));
-          expect(result.sourceLongitudeDomain, equals(LongitudeDomain.symmetric180));
-          expect(result.sourceHeightMeters, equals(1250.0));
-          expect(result.sourceHeightReference, equals(heightRef));
-          expect(result.sourceReferenceSurface, equals(ReferenceSurfaceId.lunarSphere1737400));
-          expect(result.sourceFrame, equals(ReferenceFrameId.moonMeDe421));
-
-          // 4. Exact pole provenance behavior
-          final northPoleCoords = LunarGeographicCoordinates(
-            latitude: Angle.fromDegrees(90.0),
-            latitudeType: LatitudeType.planetocentric,
-            longitude: Angle.fromDegrees(45.0),
-            longitudeDirection: LongitudeDirection.westPositive,
-            longitudeDomain: LongitudeDomain.positive360,
-            heightMeters: 0.0,
-            heightReference: heightRef,
-            frame: frame,
-          );
-          final northPoleResult =
-              transformer.transformWithProvenance(northPoleCoords);
-          expect(northPoleResult.framedVector.vector.x, equals(0.0));
-          expect(northPoleResult.framedVector.vector.y, equals(0.0));
-          expect(1 / northPoleResult.framedVector.vector.x, isPositive);
-          expect(1 / northPoleResult.framedVector.vector.y, isPositive);
-          expect(northPoleResult.framedVector.vector.z, equals(1737400.0));
-          expect(northPoleResult.sourceLatitude.inDegrees, equals(90.0));
-          expect(northPoleResult.sourceLongitudeDirection, equals(LongitudeDirection.westPositive));
-
-          // 5. Value equality of LunarCoordinateTransformationResult
-          final duplicateResult =
-              transformer.transformWithProvenance(coords);
-          expect(result, equals(duplicateResult));
-          expect(result.hashCode, equals(duplicateResult.hashCode));
-        },
-      );
+        expect(
+          () => LunarCoordinateTransformationResult.fromTransformation(
+            framedVector: mismatchedVector,
+            sourceCoordinates: coords,
+          ),
+          throwsArgumentError,
+        );
+      });
     });
   });
 }
