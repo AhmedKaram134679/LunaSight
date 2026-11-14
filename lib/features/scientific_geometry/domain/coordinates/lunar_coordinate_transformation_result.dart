@@ -35,7 +35,7 @@ class LunarCoordinateTransformationResult {
   });
 
   /// Factory constructor that guarantees provenance integrity by directly deriving
-  /// the [FramedVector3] from [sourceCoordinates] using [transformer].
+  /// the [FramedVector3] from [sourceCoordinates] using the canonical [LunarCoordinateTransformer].
   ///
   /// This ensures that [framedVector] is mathematically and geometrically bound to
   /// [sourceCoordinates], making it impossible for callers to pair valid geographic
@@ -44,6 +44,7 @@ class LunarCoordinateTransformationResult {
     LunarGeographicCoordinates sourceCoordinates, {
     LunarCoordinateTransformer transformer = const LunarCoordinateTransformer(),
   }) {
+    // Both default and explicit transformer paths use the final LunarCoordinateTransformer
     final framedVector = transformer.toBodyFixedCartesian(sourceCoordinates);
     return LunarCoordinateTransformationResult._(
       framedVector: framedVector,

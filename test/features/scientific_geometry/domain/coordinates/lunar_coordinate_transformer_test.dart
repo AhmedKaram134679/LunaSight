@@ -1639,6 +1639,37 @@ void main() {
         expect(result.sourceLongitude, equals(coords.longitude));
         expect(result.sourceFrame, equals(ReferenceFrameId.moonMeDe421));
       });
+
+      test('Enforces compile-time and runtime finality on LunarCoordinateTransformer', () {
+        // Test 3: Verify that the runtime type of transformer is exact LunarCoordinateTransformer
+        // and cannot be an overridden subclass instance.
+        const defaultTransformer = LunarCoordinateTransformer();
+        expect(
+          defaultTransformer.runtimeType,
+          equals(LunarCoordinateTransformer),
+        );
+
+        final coords = LunarGeographicCoordinates(
+          latitude: Angle.fromDegrees(0.0),
+          latitudeType: LatitudeType.planetocentric,
+          longitude: Angle.fromDegrees(0.0),
+          longitudeDirection: LongitudeDirection.eastPositive,
+          longitudeDomain: LongitudeDomain.symmetric180,
+          heightMeters: 0.0,
+          heightReference: heightRef,
+          frame: ReferenceFrameId.moonMeDe421,
+        );
+
+        final result = LunarCoordinateTransformationResult.fromCoordinates(
+          coords,
+          transformer: defaultTransformer,
+        );
+        expect(
+          result.framedVector,
+          equals(defaultTransformer.toBodyFixedCartesian(coords)),
+        );
+        expect(result.sourceCoordinates, equals(coords));
+      });
     });
   });
 }

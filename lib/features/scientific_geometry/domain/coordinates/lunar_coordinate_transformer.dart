@@ -21,7 +21,7 @@ import 'package:luna_sight/features/scientific_geometry/domain/value_objects/vec
 /// - Strict validation and rejection of non-finite results or arithmetic overflow
 /// - Output encapsulation in [FramedVector3] preserving frame identity (`MOON_ME_DE421`), lunar center of mass origin, and meter units
 /// - Full diagnostic traceability via [transformWithProvenance] yielding [LunarCoordinateTransformationResult]
-class LunarCoordinateTransformer {
+final class LunarCoordinateTransformer {
   const LunarCoordinateTransformer();
 
   /// Transforms [coords] into a Cartesian position [FramedVector3] expressed in meters.
