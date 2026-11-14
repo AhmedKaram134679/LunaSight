@@ -1544,7 +1544,7 @@ void main() {
         expect(result.hashCode, equals(duplicateResult.hashCode));
       });
 
-      test('Enforces provenance integrity: prevents inconsistent construction via factory', () {
+      test('Enforces provenance integrity: prevents same-frame incorrect vector construction', () {
         final coords = LunarGeographicCoordinates(
           latitude: Angle.fromDegrees(0.0),
           latitudeType: LatitudeType.planetocentric,
@@ -1556,20 +1556,88 @@ void main() {
           frame: ReferenceFrameId.moonMeDe421,
         );
 
-        final mismatchedVector = FramedVector3(
-          vector: Vector3(100.0, 200.0, 300.0),
-          frame: ReferenceFrameId.icrf, // Frame mismatch!
+        // A deliberately incorrect Cartesian vector with the EXACT SAME frame (MOON_ME_DE421)
+        final incorrectVectorSameFrame = FramedVector3(
+          vector: Vector3(999.0, 888.0, 777.0),
+          frame: ReferenceFrameId.moonMeDe421,
           origin: CoordinateOriginId.moonCenterOfMass,
           unit: VectorUnit.meters,
         );
 
+        // 1. fromTransformation must reject same-frame incorrect vector
         expect(
           () => LunarCoordinateTransformationResult.fromTransformation(
-            framedVector: mismatchedVector,
+            framedVector: incorrectVectorSameFrame,
             sourceCoordinates: coords,
           ),
           throwsArgumentError,
         );
+
+        // 2. fromCoordinates derives the truthful vector and does not permit passing arbitrary vectors
+        final truthfulResult =
+            LunarCoordinateTransformationResult.fromCoordinates(coords);
+        expect(
+          truthfulResult.framedVector,
+          equals(transformer.toBodyFixedCartesian(coords)),
+        );
+        expect(truthfulResult.sourceCoordinates, equals(coords));
+      });
+
+      test(
+        'Enforces provenance integrity: prevents frame mismatch construction',
+        () {
+          final coords = LunarGeographicCoordinates(
+            latitude: Angle.fromDegrees(0.0),
+            latitudeType: LatitudeType.planetocentric,
+            longitude: Angle.fromDegrees(0.0),
+            longitudeDirection: LongitudeDirection.eastPositive,
+            longitudeDomain: LongitudeDomain.symmetric180,
+            heightMeters: 0.0,
+            heightReference: heightRef,
+            frame: ReferenceFrameId.moonMeDe421,
+          );
+
+          final mismatchedFrameVector = FramedVector3(
+            vector: Vector3(1737400.0, 0.0, 0.0),
+            frame: ReferenceFrameId.icrf, // Frame mismatch!
+            origin: CoordinateOriginId.moonCenterOfMass,
+            unit: VectorUnit.meters,
+          );
+
+          expect(
+            () => LunarCoordinateTransformationResult.fromTransformation(
+              framedVector: mismatchedFrameVector,
+              sourceCoordinates: coords,
+            ),
+            throwsArgumentError,
+          );
+        },
+      );
+
+      test('LunarCoordinateTransformationResult public factory fromCoordinates binds provenance truthfully', () {
+        final coords = LunarGeographicCoordinates(
+          latitude: Angle.fromDegrees(-88.45),
+          latitudeType: LatitudeType.planetodetic,
+          longitude: Angle.fromDegrees(-160.0),
+          longitudeDirection: LongitudeDirection.eastPositive,
+          longitudeDomain: LongitudeDomain.symmetric180,
+          heightMeters: 0.0,
+          heightReference: heightRef,
+          frame: frame,
+        );
+
+        final result = LunarCoordinateTransformationResult.fromCoordinates(
+          coords,
+        );
+
+        expect(result.sourceCoordinates, equals(coords));
+        expect(
+          result.framedVector,
+          equals(transformer.toBodyFixedCartesian(coords)),
+        );
+        expect(result.sourceLatitude, equals(coords.latitude));
+        expect(result.sourceLongitude, equals(coords.longitude));
+        expect(result.sourceFrame, equals(ReferenceFrameId.moonMeDe421));
       });
     });
   });

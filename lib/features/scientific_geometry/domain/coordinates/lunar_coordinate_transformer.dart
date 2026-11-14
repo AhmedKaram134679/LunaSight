@@ -113,10 +113,9 @@ class LunarCoordinateTransformer {
   LunarCoordinateTransformationResult transformWithProvenance(
     LunarGeographicCoordinates coords,
   ) {
-    final framed = toBodyFixedCartesian(coords);
-    return LunarCoordinateTransformationResult.fromTransformation(
-      framedVector: framed,
-      sourceCoordinates: coords,
+    return LunarCoordinateTransformationResult.fromCoordinates(
+      coords,
+      transformer: this,
     );
   }
 }

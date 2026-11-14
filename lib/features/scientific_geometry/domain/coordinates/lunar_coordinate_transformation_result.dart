@@ -1,5 +1,6 @@
 import 'package:meta/meta.dart';
 import 'package:luna_sight/features/scientific_geometry/domain/coordinates/coordinate_conventions.dart';
+import 'package:luna_sight/features/scientific_geometry/domain/coordinates/lunar_coordinate_transformer.dart';
 import 'package:luna_sight/features/scientific_geometry/domain/coordinates/lunar_geographic_coordinates.dart';
 import 'package:luna_sight/features/scientific_geometry/domain/coordinates/reference_surface_id.dart';
 import 'package:luna_sight/features/scientific_geometry/domain/quantities/angle.dart';
@@ -9,10 +10,11 @@ import 'package:luna_sight/features/scientific_geometry/domain/value_objects/ref
 /// Immutable domain value object representing the output of a forward lunar coordinate
 /// transformation paired with its complete source-coordinate provenance and reference geometry.
 ///
-/// Satisfies the Phase 04C provenance contract:
-/// - Guarantees provenance integrity: instances can only be created via the controlled factory
-///   [LunarCoordinateTransformationResult.fromTransformation], ensuring that [framedVector]
-///   and [sourceCoordinates] cannot be arbitrarily or inconsistently paired.
+/// Satisfies the Phase 04C provenance integrity contract:
+/// - Guarantees provenance truthfulness: instances can ONLY be instantiated by computing
+///   the forward Cartesian transformation directly from [sourceCoordinates] via the trusted
+///   [LunarCoordinateTransformer]. Callers cannot independently supply an arbitrary or fabricated
+///   [FramedVector3], preventing any same-frame or cross-frame provenance inconsistency.
 /// - Preserves the resulting [framedVector] ([FramedVector3]) with zero modifications to Phase 04B.
 /// - Retains full diagnostic and scientific traceability to the original [sourceCoordinates] ([LunarGeographicCoordinates]).
 /// - Exposes direct accessors for source latitude, longitude, conventions, height datum, and reference surface dimensions.
@@ -32,11 +34,29 @@ class LunarCoordinateTransformationResult {
     required this.sourceCoordinates,
   });
 
-  /// Controlled factory method creating a [LunarCoordinateTransformationResult].
+  /// Factory constructor that guarantees provenance integrity by directly deriving
+  /// the [FramedVector3] from [sourceCoordinates] using [transformer].
   ///
-  /// Validates that [framedVector] and [sourceCoordinates] share identical reference frame identity.
-  /// Intended for use by authorized coordinate transformation engines such as
-  /// `LunarCoordinateTransformer.transformWithProvenance`.
+  /// This ensures that [framedVector] is mathematically and geometrically bound to
+  /// [sourceCoordinates], making it impossible for callers to pair valid geographic
+  /// coordinates with an arbitrary, fabricated, or inconsistent Cartesian vector.
+  factory LunarCoordinateTransformationResult.fromCoordinates(
+    LunarGeographicCoordinates sourceCoordinates, {
+    LunarCoordinateTransformer transformer = const LunarCoordinateTransformer(),
+  }) {
+    final framedVector = transformer.toBodyFixedCartesian(sourceCoordinates);
+    return LunarCoordinateTransformationResult._(
+      framedVector: framedVector,
+      sourceCoordinates: sourceCoordinates,
+    );
+  }
+
+  /// Package-private factory method allowing an authorized [LunarCoordinateTransformer]
+  /// to construct a result from precomputed components after verifying mathematical consistency.
+  ///
+  /// Enforces that [framedVector] must match the reference frame, origin, and units of
+  /// the transformation contract, and that its components match the transformation of [sourceCoordinates].
+  @internal
   factory LunarCoordinateTransformationResult.fromTransformation({
     required FramedVector3 framedVector,
     required LunarGeographicCoordinates sourceCoordinates,
@@ -45,6 +65,15 @@ class LunarCoordinateTransformationResult {
       throw ArgumentError(
         'Provenance frame mismatch: framedVector frame (${framedVector.frame.name}) '
         'does not match sourceCoordinates frame (${sourceCoordinates.frame.name}).',
+      );
+    }
+    // Verify that framedVector is genuinely the transformation of sourceCoordinates
+    const transformer = LunarCoordinateTransformer();
+    final expectedVector = transformer.toBodyFixedCartesian(sourceCoordinates);
+    if (framedVector != expectedVector) {
+      throw ArgumentError(
+        'Provenance integrity violation: framedVector (${framedVector.vector}) '
+        'does not match the Cartesian coordinates computed from sourceCoordinates (${expectedVector.vector}).',
       );
     }
     return LunarCoordinateTransformationResult._(

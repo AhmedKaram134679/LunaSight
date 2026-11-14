@@ -454,36 +454,41 @@ The expected approximate Cartesian position is:
 - Y: −16,073.394118 m
 - Z: −1,736,764.286453 m
 
-#### Numerical Error Budget and Floating-Point Audit for Canonical Fixture (§10.4.1)
+#### Fixture-Specific Numerical Assessment and Empirical Regression Tolerance (§10.4.1)
 
-The test comparison tolerance must not be an arbitrary constant; it must derive from the documented mathematical error budget and IEEE-754 precision parameters:
+The test comparison tolerance must not be an arbitrary constant; it must derive from an explicit understanding of IEEE-754 precision parameters, representation limits, and fixture-specific numerical evaluations:
 
-1. **IEEE-754 binary64 Floating-Point Parameters:**
+1. **IEEE-754 binary64 Floating-Point Definitions:**
    - Under standard numerical analysis terminology for IEEE-754 binary64 arithmetic (53-bit significand):
      - **Machine epsilon** ($\varepsilon_{\text{mach}} = 2^{-52} \approx 2.220446049250313 \times 10^{-16}$) is the difference between 1.0 and the next larger representable binary64 number.
      - **Unit roundoff** ($u = 2^{-53} \approx 1.1102230246251565 \times 10^{-16}$) is the maximum relative error under round-to-nearest floating-point evaluation ($|\text{fl}(x) - x| / |x| \le u$).
    - Note: The quantity $1.11 \times 10^{-16}$ is unit roundoff $u$, not machine epsilon $\varepsilon_{\text{mach}}$.
 
-2. **Reference Value Truncation Uncertainty ($\epsilon_{\text{trunc}}$):**
-   The canonical fixture reference coordinates are published rounded to 6 decimal places (micrometer resolution), introducing a maximum half-unit-in-the-last-place rounding uncertainty:
+2. **Published Reference Value Truncation Uncertainty ($\epsilon_{\text{trunc}}$):**
+   The canonical fixture reference coordinates are published rounded to 6 decimal places (micrometer resolution), introducing a maximum half-unit-in-the-last-place decimal representation uncertainty:
    $$\epsilon_{\text{trunc}} = \frac{1}{2} \times 10^{-6}\text{ m} = 0.50 \times 10^{-6}\text{ m} = 5.0 \times 10^{-7}\text{ m}$$
 
-3. **Floating-Point Arithmetic Discretization for Fixture ($\epsilon_{\text{fp}}$):**
+3. **Observed Discrepancy for Canonical Fixture ($\epsilon_{\text{observed}}$):**
    For the canonical fixture inputs ($\varphi = -88.45^\circ$, $\lambda = -160.0^\circ$, $r = 1,737,400.0\text{ m}$), evaluation of:
    $$\text{deg2rad} \to \sin / \cos \to \text{multiplication by } r$$
-   produces component-specific roundoff differences relative to infinite-precision mathematical evaluation:
+   produces component-specific observed differences relative to infinite-precision mathematical evaluation:
    $$\begin{aligned}
    |X_{\text{exact}} - X_{\text{b64}}| &\approx 1.33 \times 10^{-7}\text{ m} \\
    |Y_{\text{exact}} - Y_{\text{b64}}| &\approx 3.40 \times 10^{-7}\text{ m} \\
    |Z_{\text{exact}} - Z_{\text{b64}}| &\approx 4.00 \times 10^{-7}\text{ m}
    \end{aligned}$$
-   All component-specific arithmetic discretization differences for this fixture satisfy $\epsilon_{\text{fp}} \le 0.40 \times 10^{-6}\text{ m}$.
-   *(Note: These values are fixture-specific evaluations under binary64 transcendental implementations and represent an audited bound for this canonical regression case, rather than a universal analytic bound for all planetary bodies and coordinates).*
+   All component-specific arithmetic discretization differences for this specific fixture satisfy $\epsilon_{\text{observed}} \le 0.40 \times 10^{-6}\text{ m}$.
 
-4. **Fixture Total Numerical Error Bound ($\Delta_{\text{max}}$):**
-   Combining published truncation uncertainty and fixture arithmetic roundoff:
-   $$\Delta_{\text{max}} = \epsilon_{\text{trunc}} + \epsilon_{\text{fp}} \le 0.50 \times 10^{-6}\text{ m} + 0.40 \times 10^{-6}\text{ m} = 0.90 \times 10^{-6}\text{ m} < 1.0 \times 10^{-6}\text{ m} = 1.0\ \mu\text{m}$$
-   This derivation provides technical justification for maintaining the canonical regression fixture test tolerance at $1.0 \times 10^{-6}\text{ m}$ ($1.0\ \mu\text{m}$) without arbitrary tolerance inflation.
+4. **Empirical Regression Tolerance ($1.0\ \mu\text{m}$) and Scientific Limitations:**
+   Combining the decimal representation uncertainty with the observed fixture difference yields an empirical threshold:
+   $$\Delta_{\text{empirical}} = \epsilon_{\text{trunc}} + \epsilon_{\text{observed}} \le 0.50 \times 10^{-6}\text{ m} + 0.40 \times 10^{-6}\text{ m} = 0.90 \times 10^{-6}\text{ m} < 1.0 \times 10^{-6}\text{ m} = 1.0\ \mu\text{m}$$
+   The $1.0\ \mu\text{m}$ value is retained strictly as an **empirical regression tolerance** for continuous integration testing of this canonical fixture.
+
+   **Explicit Scientific Disclaimers & Mathematical Boundaries:**
+   - The observed $\le 0.40\ \mu\text{m}$ discrepancy is **NOT** a proven universal mathematical upper bound across all valid planetary coordinates, heights, or radii.
+   - IEEE-754 unit roundoff alone does **NOT** prove the accuracy of the complete transformation pipeline because the calculation depends on platform-dependent transcendental functions (`math.sin` and `math.cos`), whose implementation error (e.g. table lookups, polynomial approximations) has not been formally bounded in this project.
+   - This empirical regression tolerance does **NOT** guarantee identical micrometer bounds for arbitrary coordinates or extreme radial heights.
+   - It must **NOT** be interpreted as a complete scientific uncertainty budget for operational lunar navigation.
 
 ### 10.5 Independent Verification and External Horizons Comparison
 
