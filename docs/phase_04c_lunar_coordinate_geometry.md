@@ -268,7 +268,7 @@ West-positive longitude must first be converted into the equivalent east-positiv
 
 ### 7.2 Transformation equations
 
-For the selected spherical model:
+For non-polar latitudes, the standard spherical equations apply:
 
 `x = r × cos(φ) × cos(λ)`
 
@@ -282,7 +282,36 @@ Output:
 
 All output components are expressed in meters.
 
-### 7.3 Axis convention
+### 7.3 Exact-pole numerical contract
+
+At the exact poles, spherical coordinates have a coordinate singularity where longitude does not define a unique physical direction. In mathematical analysis, $\cos(\pm\pi/2) = 0$, yielding $x = 0$ and $y = 0$. However, in standard IEEE-754 binary64 floating-point evaluation, $\pi/2$ cannot be represented with infinite precision, so `cos(math.pi / 2)` evaluates to a non-zero machine-precision quantity (approximately $6.12323 \times 10^{-17}$), which when multiplied by radius $r \approx 1.74 \times 10^6\text{ m}$ would yield spurious non-zero Cartesian offsets ($x, y \sim 10^{-10}\text{ m}$) depending on the input longitude.
+
+To guarantee exact, deterministic, and longitude-independent polar positions:
+
+1. **North Pole (`latitude == +90°` exactly):**
+   - $X = +0.0$ (exact positive zero).
+   - $Y = +0.0$ (exact positive zero).
+   - $Z = r$ (effective radius $R + h$).
+
+2. **South Pole (`latitude == -90°` exactly):**
+   - $X = +0.0$ (exact positive zero).
+   - $Y = +0.0$ (exact positive zero).
+   - $Z = -r$ (negative effective radius $-(R + h)$).
+
+3. **Strict Scope of Exact-Pole Rule:**
+   - This rule applies **strictly and only** to exact input values of `+90°` and `-90°` (or exact $\pm\pi/2\text{ rad}$).
+   - Do **not** introduce an epsilon.
+   - Do **not** snap nearby latitudes to a pole.
+   - Do **not** clamp or alter valid non-polar latitudes (e.g. $89.999999°$ or $-88.45°$ must continue to evaluate via the ordinary trigonometric transformation equations).
+
+4. **Validation Preservation:**
+   - Longitude finiteness, direction, and declared input domain must continue to be validated according to the general coordinate input contract. The exact-pole rule must **not** bypass general input validation.
+   - Non-finite or invalid longitudes must be rejected even at exact poles.
+
+5. **Canonical Result Invariance:**
+   - All valid longitude representations for the same exact pole (e.g. $+90^\circ$ with $0^\circ\text{E}$, $90^\circ\text{E}$, $180^\circ\text{E}$, or $120^\circ\text{W}$) must produce the exact same canonical Cartesian vector.
+
+### 7.4 Axis convention
 
 The Cartesian axes follow the declared body-fixed frame:
 
@@ -292,7 +321,7 @@ The Cartesian axes follow the declared body-fixed frame:
 
 The transformer must not assume that this frame is interchangeable with another lunar frame realization.
 
-### 7.4 Output contract
+### 7.5 Output contract
 
 The result must be represented using the existing Phase 04B geometry types:
 
@@ -388,14 +417,26 @@ Expected magnitudes must reflect the selected effective radius.
 - Missing height-reference rejection.
 - Incompatible height-reference rejection.
 
-### 10.3 Convention cases
+### 10.3 Convention and exact-pole cases
 
 - East-positive longitude.
 - West-positive longitude with equivalent geographic position.
-- Equivalent longitude representations across the accepted domains.
+- Equivalent longitude representations across the accepted domains (`[-180°, +180°]` and `[0°, 360°)`).
 - Longitude wraparound.
-- Pole behavior independent of longitude.
-- Both supported latitude types under the spherical reference model.
+- Both supported latitude types (`planetocentric` and `planetodetic`) under the spherical reference model.
+- **Exact North Pole Verification:**
+  - Multiple valid east-positive longitudes (e.g., $0^\circ\text{E}$, $45^\circ\text{E}$, $90^\circ\text{E}$, $180^\circ\text{E}$, $270^\circ\text{E}$).
+  - Equivalent west-positive longitudes (e.g., $0^\circ\text{W}$, $90^\circ\text{W}$, $180^\circ\text{W}$, $270^\circ\text{W}$).
+  - Strict output requirements: $X = +0.0$, $Y = +0.0$, $Z = +r$ (exact positive zero for X and Y, exact $+r$ for Z).
+  - Identical Cartesian vector returned across all valid longitude representations of $+90^\circ$.
+- **Exact South Pole Verification:**
+  - Multiple valid east-positive and west-positive longitude representations.
+  - Strict output requirements: $X = +0.0$, $Y = +0.0$, $Z = -r$ (exact positive zero for X and Y, exact $-r$ for Z).
+  - Identical Cartesian vector returned across all valid longitude representations of $-90^\circ$.
+- **Non-Polar Latitude Verification (No Pole Snapping):**
+  - Latitudes near the poles (e.g., $\pm 89.9999^\circ$, $\pm 88.45^\circ$) must evaluate strictly using the ordinary trigonometric equations without pole snapping or artificial clamping.
+- **Pole Validation Integrity:**
+  - Non-finite or invalid longitude passed with an exact pole must still be rejected by general input validation rules.
 
 ### 10.4 Canonical regression case
 
