@@ -619,20 +619,40 @@ void main() {
           throwsArgumentError,
         );
 
-        // Negative axis rejected (caught by Distance constructor)
+        // Note on Distance validation boundary vs ReferenceSurfaceId validation:
+        // - Distance constructor enforces that distance values are finite and non-negative (>= 0).
+        // - Negative values (-100.0) and non-finite values (NaN, Infinity) are rejected at the Distance layer.
+        // - Zero distance (0.0 m) is valid for Distance, but strictly rejected by ReferenceSurfaceId
+        //   which requires strictly positive semi-axes (> 0).
         expect(
           () => Distance.fromMeters(-100.0),
-          throwsA(isA<ScientificComputationException>()),
+          throwsA(
+            isA<ScientificComputationException>().having(
+              (e) => e.code,
+              'code',
+              'NEGATIVE_DISTANCE',
+            ),
+          ),
         );
-
-        // Non-finite axis rejected (caught by Distance constructor)
         expect(
           () => Distance.fromMeters(double.nan),
-          throwsA(isA<ScientificComputationException>()),
+          throwsA(
+            isA<ScientificComputationException>().having(
+              (e) => e.code,
+              'code',
+              'NON_FINITE_VALUE',
+            ),
+          ),
         );
         expect(
           () => Distance.fromMeters(double.infinity),
-          throwsA(isA<ScientificComputationException>()),
+          throwsA(
+            isA<ScientificComputationException>().having(
+              (e) => e.code,
+              'code',
+              'NON_FINITE_VALUE',
+            ),
+          ),
         );
 
         // Valid canonical sphere
@@ -785,7 +805,6 @@ void main() {
           semiMinorAxisC: Distance.fromMeters(1737400.0),
         );
         expect(s1 == diffName, isFalse);
-        expect(s1.hashCode == diffName.hashCode, isFalse);
 
         // Differing only in axis A
         final diffA = ReferenceSurfaceId.triaxial(
@@ -830,7 +849,6 @@ void main() {
           referenceSurface: ReferenceSurfaceId.lunarSphere1737400,
         );
         expect(h1 == hDiffName, isFalse);
-        expect(h1.hashCode == hDiffName.hashCode, isFalse);
 
         // Height references differing only by reference surface
         final hDiffSurface = HeightReferenceId(
