@@ -61,21 +61,23 @@ The implementation contract is based on the following distinctions:
 
 3. NAIF lunar frame definitions provide DE-specific realizations. The generic names `MOON_ME` and `MOON_PA` are aliases whose actual realizations depend on the loaded lunar frame kernel.
 
-4. Coordinate terminology separation:
-   - **Planetocentric latitude:** defined by the direction of the position vector from the body's center of mass (or center of coordinate origin) to the surface point.
-   - **Planetographic latitude:** defined relative to the surface normal of a specified reference spheroid/ellipsoid. (NAIF's `pgrrec` provides a standard utility for converting planetographic coordinates to rectangular coordinates, where longitude direction conventions are tied to body rotation direction).
-   - **Planetodetic / geodetic latitude:** the specific terminology used by JPL Horizons for its `GEODETIC` surface-coordinate input mode (`COORD_TYPE = 'GEODETIC'`), defined relative to a reference model/spheroid (associated with DE421 for the Moon). NAIF's `pgrrec` documentation does not directly define the Horizons `GEODETIC` / planetodetic input convention.
+4. Coordinate terminology relationship:
+   - **Planetocentric latitude:** angle defined by the position vector from the body's center of mass (or coordinate origin center) to the surface point.
+   - **Planetographic latitude:** defined using the outward normal to a specified reference spheroid, as documented by NAIF `pgrrec`.
+   - **Planetodetic / geodetic latitude:** the terminology used by JPL Horizons for its `GEODETIC` surface-coordinate input mode (`COORD_TYPE = 'GEODETIC'`). Its geometric latitude definition is normal-based and corresponds to the planetographic/planetodetic concept described by NAIF, while the exact input contract, longitude conventions, reference model, and altitude semantics must be taken from the relevant Horizons documentation.
+   - NAIF `pgrrec` documents the planetographic-to-rectangular coordinate conversion and explicitly states that planetographic latitude is identical to planetodetic latitude (also called geodetic in SPICE documentation). These two terms represent the same underlying normal-based geometric latitude concept on a reference spheroid, rather than two independent mathematical latitude definitions. However, `pgrrec` must NOT be presented as the authoritative specification of the JPL Horizons input interface.
 
-5. A spherical reference surface with equal radii ($a = b = c = R$) is a special geometric case in which planetocentric, planetographic, and planetodetic/geodetic latitude produce the exact same geometric surface direction. However, these definitions must not be treated as interchangeable for any non-spherical reference surface.
+5. Spherical model equivalence: When the selected reference surface is exactly spherical ($a = b = c = R$), the surface normal passes through the center of mass, so planetocentric latitude and normal-based planetographic/planetodetic/geodetic latitude produce the exact same geometric surface direction. This equivalence is a geometric property of the sphere and must not be generalized to any non-spherical reference surface (such as an oblate or triaxial ellipsoid).
 
 ### Authoritative references
 
-- NASA, A Standardized Lunar Coordinate System for the Constellation Program (Lunar Coordinate White Paper, Archinal et al., 2008 / NASA-TM-2008-215366):
-  Defines the recommended lunar planetocentric Mean Earth/Polar Axis (`MOON_ME`) convention and coordinate system definitions.
+- NASA, *A Standardized Lunar Coordinate System for the Lunar Reconnaissance Orbiter and Lunar Datasets* (LRO Project and LGCWG White Paper, Version 5, 2008 October 1; Archinal et al.):
+  https://science.nasa.gov/wp-content/uploads/2024/01/luncoordwhitepaper-10-08.pdf
+  Defines the recommended lunar planetocentric Mean Earth/Polar Axis (`MOON_ME`) coordinate convention, reference system definitions, and the $1,737.4\text{ km}$ reference sphere.
 
 - JPL, Horizons System User Manual (Giorgini et al., SSD/JPL):
   https://ssd.jpl.nasa.gov/horizons/manual.html
-  Specifies the `GEODETIC` / planetodetic surface-coordinate input convention (`SITE_COORD`), reference ellipsoid parameters tied to DE421, and height reference semantics.
+  Documents the Horizons `GEODETIC`/planetodetic coordinate input contract (`SITE_COORD`), east longitude and geodetic latitude, the Moon's mean-Earth reference associated with DE421, and the documented altitude/reference-surface semantics.
 
 - NAIF, Lunar Frames Kernel Tutorial:
   https://naif.jpl.nasa.gov/pub/naif/toolkit_docs/Tutorials/pdf/individual_docs/23_lunar-earth_pck-fk.pdf
@@ -85,7 +87,7 @@ The implementation contract is based on the following distinctions:
 
 - NAIF, `pgrrec` — Planetographic to Rectangular Coordinates:
   https://naif.jpl.nasa.gov/pub/naif/toolkit_docs/C/cspice/pgrrec_c.html
-  Reference for planetographic-to-rectangular coordinate conversion only.
+  Documents the planetographic-to-rectangular coordinate conversion, noting the equivalence of planetographic and planetodetic/geodetic latitude. Reference for planetographic coordinate conversion only; not an authoritative specification of the JPL Horizons interface.
 
 - NAIF, `latrec` / `srfrec` and coordinate APIs:  
   https://naif.jpl.nasa.gov/pub/naif/toolkit_docs/C/info/mostused.html
