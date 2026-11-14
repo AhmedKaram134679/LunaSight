@@ -15,6 +15,68 @@ void main() {
     const posTolerance = 1e-9; // meters
 
     group('A. Input Validation & Failures', () {
+      test('Rejects non-finite latitude (NaN, +Infinity, -Infinity)', () {
+        expect(
+          () => LunarGeographicCoordinates(
+            latitude: Angle.fromRadians(double.nan),
+            latitudeType: LatitudeType.planetodetic,
+            longitude: Angle.fromDegrees(0.0),
+            longitudeDirection: LongitudeDirection.eastPositive,
+            longitudeDomain: LongitudeDomain.symmetric180,
+            heightMeters: 0.0,
+            heightReference: heightRef,
+            frame: frame,
+          ),
+          throwsA(
+            isA<ScientificComputationException>().having(
+              (e) => e.code,
+              'code',
+              'NON_FINITE_VALUE',
+            ),
+          ),
+        );
+
+        expect(
+          () => LunarGeographicCoordinates(
+            latitude: Angle.fromRadians(double.infinity),
+            latitudeType: LatitudeType.planetodetic,
+            longitude: Angle.fromDegrees(0.0),
+            longitudeDirection: LongitudeDirection.eastPositive,
+            longitudeDomain: LongitudeDomain.symmetric180,
+            heightMeters: 0.0,
+            heightReference: heightRef,
+            frame: frame,
+          ),
+          throwsA(
+            isA<ScientificComputationException>().having(
+              (e) => e.code,
+              'code',
+              'NON_FINITE_VALUE',
+            ),
+          ),
+        );
+
+        expect(
+          () => LunarGeographicCoordinates(
+            latitude: Angle.fromRadians(double.negativeInfinity),
+            latitudeType: LatitudeType.planetodetic,
+            longitude: Angle.fromDegrees(0.0),
+            longitudeDirection: LongitudeDirection.eastPositive,
+            longitudeDomain: LongitudeDomain.symmetric180,
+            heightMeters: 0.0,
+            heightReference: heightRef,
+            frame: frame,
+          ),
+          throwsA(
+            isA<ScientificComputationException>().having(
+              (e) => e.code,
+              'code',
+              'NON_FINITE_VALUE',
+            ),
+          ),
+        );
+      });
+
       test('Rejects latitude outside [-90.0°, +90.0°]', () {
         expect(
           () => LunarGeographicCoordinates(
@@ -52,6 +114,130 @@ void main() {
               (e) => e.code,
               'code',
               'COORDINATE_OUT_OF_RANGE',
+            ),
+          ),
+        );
+      });
+
+      test('Rejects non-finite longitude (NaN, +Infinity, -Infinity) in symmetric180', () {
+        expect(
+          () => LunarGeographicCoordinates(
+            latitude: Angle.fromDegrees(0.0),
+            latitudeType: LatitudeType.planetodetic,
+            longitude: Angle.fromRadians(double.nan),
+            longitudeDirection: LongitudeDirection.eastPositive,
+            longitudeDomain: LongitudeDomain.symmetric180,
+            heightMeters: 0.0,
+            heightReference: heightRef,
+            frame: frame,
+          ),
+          throwsA(
+            isA<ScientificComputationException>().having(
+              (e) => e.code,
+              'code',
+              'NON_FINITE_VALUE',
+            ),
+          ),
+        );
+
+        expect(
+          () => LunarGeographicCoordinates(
+            latitude: Angle.fromDegrees(0.0),
+            latitudeType: LatitudeType.planetodetic,
+            longitude: Angle.fromRadians(double.infinity),
+            longitudeDirection: LongitudeDirection.eastPositive,
+            longitudeDomain: LongitudeDomain.symmetric180,
+            heightMeters: 0.0,
+            heightReference: heightRef,
+            frame: frame,
+          ),
+          throwsA(
+            isA<ScientificComputationException>().having(
+              (e) => e.code,
+              'code',
+              'NON_FINITE_VALUE',
+            ),
+          ),
+        );
+
+        expect(
+          () => LunarGeographicCoordinates(
+            latitude: Angle.fromDegrees(0.0),
+            latitudeType: LatitudeType.planetodetic,
+            longitude: Angle.fromRadians(double.negativeInfinity),
+            longitudeDirection: LongitudeDirection.eastPositive,
+            longitudeDomain: LongitudeDomain.symmetric180,
+            heightMeters: 0.0,
+            heightReference: heightRef,
+            frame: frame,
+          ),
+          throwsA(
+            isA<ScientificComputationException>().having(
+              (e) => e.code,
+              'code',
+              'NON_FINITE_VALUE',
+            ),
+          ),
+        );
+      });
+
+      test('Rejects non-finite longitude (NaN, +Infinity, -Infinity) in positive360', () {
+        expect(
+          () => LunarGeographicCoordinates(
+            latitude: Angle.fromDegrees(0.0),
+            latitudeType: LatitudeType.planetodetic,
+            longitude: Angle.fromRadians(double.nan),
+            longitudeDirection: LongitudeDirection.eastPositive,
+            longitudeDomain: LongitudeDomain.positive360,
+            heightMeters: 0.0,
+            heightReference: heightRef,
+            frame: frame,
+          ),
+          throwsA(
+            isA<ScientificComputationException>().having(
+              (e) => e.code,
+              'code',
+              'NON_FINITE_VALUE',
+            ),
+          ),
+        );
+
+        expect(
+          () => LunarGeographicCoordinates(
+            latitude: Angle.fromDegrees(0.0),
+            latitudeType: LatitudeType.planetodetic,
+            longitude: Angle.fromRadians(double.infinity),
+            longitudeDirection: LongitudeDirection.eastPositive,
+            longitudeDomain: LongitudeDomain.positive360,
+            heightMeters: 0.0,
+            heightReference: heightRef,
+            frame: frame,
+          ),
+          throwsA(
+            isA<ScientificComputationException>().having(
+              (e) => e.code,
+              'code',
+              'NON_FINITE_VALUE',
+            ),
+          ),
+        );
+
+        expect(
+          () => LunarGeographicCoordinates(
+            latitude: Angle.fromDegrees(0.0),
+            latitudeType: LatitudeType.planetodetic,
+            longitude: Angle.fromRadians(double.negativeInfinity),
+            longitudeDirection: LongitudeDirection.eastPositive,
+            longitudeDomain: LongitudeDomain.positive360,
+            heightMeters: 0.0,
+            heightReference: heightRef,
+            frame: frame,
+          ),
+          throwsA(
+            isA<ScientificComputationException>().having(
+              (e) => e.code,
+              'code',
+              'NON_FINITE_VALUE',
             ),
           ),
         );
@@ -125,6 +311,26 @@ void main() {
             latitude: Angle.fromDegrees(0.0),
             latitudeType: LatitudeType.planetodetic,
             longitude: Angle.fromDegrees(360.0),
+            longitudeDirection: LongitudeDirection.eastPositive,
+            longitudeDomain: LongitudeDomain.positive360,
+            heightMeters: 0.0,
+            heightReference: heightRef,
+            frame: frame,
+          ),
+          throwsA(
+            isA<ScientificComputationException>().having(
+              (e) => e.code,
+              'code',
+              'COORDINATE_OUT_OF_RANGE',
+            ),
+          ),
+        );
+
+        expect(
+          () => LunarGeographicCoordinates(
+            latitude: Angle.fromDegrees(0.0),
+            latitudeType: LatitudeType.planetodetic,
+            longitude: Angle.fromDegrees(365.0),
             longitudeDirection: LongitudeDirection.eastPositive,
             longitudeDomain: LongitudeDomain.positive360,
             heightMeters: 0.0,
@@ -352,6 +558,88 @@ void main() {
               (e) => e.code,
               'code',
               'NON_POSITIVE_EFFECTIVE_RADIUS',
+            ),
+          ),
+        );
+      });
+
+      test('ReferenceSurfaceId constructor safety and validation', () {
+        // Missing A axis
+        expect(
+          () => ReferenceSurfaceId(
+            name: 'MISSING_A',
+            polarRadius: Distance.fromMeters(1737400.0),
+          ),
+          throwsArgumentError,
+        );
+
+        // Missing C axis
+        expect(
+          () => ReferenceSurfaceId(
+            name: 'MISSING_C',
+            equatorialRadius: Distance.fromMeters(1737400.0),
+          ),
+          throwsArgumentError,
+        );
+
+        // Zero axis rejected
+        expect(
+          () => ReferenceSurfaceId(
+            name: 'ZERO_A',
+            equatorialRadius: Distance.fromMeters(0.0),
+            polarRadius: Distance.fromMeters(1737400.0),
+          ),
+          throwsArgumentError,
+        );
+
+        expect(
+          () => ReferenceSurfaceId(
+            name: 'ZERO_C',
+            equatorialRadius: Distance.fromMeters(1737400.0),
+            polarRadius: Distance.fromMeters(0.0),
+          ),
+          throwsArgumentError,
+        );
+
+        // Negative axis rejected (caught by Distance or constructor validator)
+        expect(
+          () => Distance.fromMeters(-100.0),
+          throwsA(isA<ScientificComputationException>()),
+        );
+
+        // Non-finite axis rejected (caught by Distance or constructor validator)
+        expect(
+          () => Distance.fromMeters(double.nan),
+          throwsA(isA<ScientificComputationException>()),
+        );
+        expect(
+          () => Distance.fromMeters(double.infinity),
+          throwsA(isA<ScientificComputationException>()),
+        );
+
+        // Valid canonical sphere
+        final canonical = ReferenceSurfaceId.lunarSphere1737400;
+        expect(canonical.semiMajorAxisA.meters, 1737400.0);
+        expect(canonical.semiIntermediateAxisB.meters, 1737400.0);
+        expect(canonical.semiMinorAxisC.meters, 1737400.0);
+        expect(canonical.isSpherical, isTrue);
+
+        // Valid explicitly defined non-canonical surface is constructible as a domain object
+        final nonCanonical = ReferenceSurfaceId(
+          name: 'MARS_SPHERE',
+          equatorialRadius: Distance.fromMeters(3396190.0),
+          polarRadius: Distance.fromMeters(3396190.0),
+        );
+        expect(nonCanonical.name, 'MARS_SPHERE');
+        expect(nonCanonical.equatorialRadius.meters, 3396190.0);
+        // But rejected when validated against Phase 04C spherical baseline
+        expect(
+          () => nonCanonical.validateSphericalBaseline(),
+          throwsA(
+            isA<ScientificComputationException>().having(
+              (e) => e.code,
+              'code',
+              'INCOMPATIBLE_HEIGHT_REFERENCE',
             ),
           ),
         );
@@ -640,6 +928,48 @@ void main() {
       });
 
       test('Exact poles strictly reject invalid longitude inputs', () {
+        // Non-finite longitude at North Pole must be rejected
+        expect(
+          () => LunarGeographicCoordinates(
+            latitude: Angle.fromDegrees(90.0),
+            latitudeType: LatitudeType.planetodetic,
+            longitude: Angle.fromRadians(double.nan),
+            longitudeDirection: LongitudeDirection.eastPositive,
+            longitudeDomain: LongitudeDomain.symmetric180,
+            heightMeters: 0.0,
+            heightReference: heightRef,
+            frame: frame,
+          ),
+          throwsA(
+            isA<ScientificComputationException>().having(
+              (e) => e.code,
+              'code',
+              'NON_FINITE_VALUE',
+            ),
+          ),
+        );
+
+        // Non-finite longitude at South Pole must be rejected
+        expect(
+          () => LunarGeographicCoordinates(
+            latitude: Angle.fromDegrees(-90.0),
+            latitudeType: LatitudeType.planetodetic,
+            longitude: Angle.fromRadians(double.infinity),
+            longitudeDirection: LongitudeDirection.eastPositive,
+            longitudeDomain: LongitudeDomain.symmetric180,
+            heightMeters: 0.0,
+            heightReference: heightRef,
+            frame: frame,
+          ),
+          throwsA(
+            isA<ScientificComputationException>().having(
+              (e) => e.code,
+              'code',
+              'NON_FINITE_VALUE',
+            ),
+          ),
+        );
+
         // Longitude outside symmetric180 domain at North Pole must be rejected
         expect(
           () => LunarGeographicCoordinates(

@@ -22,9 +22,11 @@ class ReferenceSurfaceId {
 
   /// Primary constructor supporting three-axis ($a, b, c$) models as well as two-radius models.
   ///
-  /// If [semiMajorAxisA] is omitted, [equatorialRadius] must be provided.
-  /// If [semiIntermediateAxisB] is omitted, it defaults to the equatorial radius.
-  /// If [semiMinorAxisC] is omitted, [polarRadius] must be provided.
+  /// Either [semiMajorAxisA] or [equatorialRadius] must be provided.
+  /// If [semiIntermediateAxisB] is omitted, it defaults to the equatorial semi-axis $a$.
+  /// Either [semiMinorAxisC] or [polarRadius] must be provided.
+  ///
+  /// Throws [ArgumentError] if required axes are missing, non-finite, zero, or negative.
   ReferenceSurfaceId({
     required this.name,
     Distance? semiMajorAxisA,
@@ -32,10 +34,46 @@ class ReferenceSurfaceId {
     Distance? semiMinorAxisC,
     Distance? equatorialRadius,
     Distance? polarRadius,
-  }) : semiMajorAxisA = semiMajorAxisA ?? equatorialRadius!,
-       semiIntermediateAxisB =
-           semiIntermediateAxisB ?? semiMajorAxisA ?? equatorialRadius!,
-       semiMinorAxisC = semiMinorAxisC ?? polarRadius!;
+  }) : semiMajorAxisA = _resolveAndValidateAxis(
+         axisName: 'a (semiMajorAxisA / equatorialRadius)',
+         primary: semiMajorAxisA,
+         fallback: equatorialRadius,
+       ),
+       semiIntermediateAxisB = _resolveAndValidateAxis(
+         axisName: 'b (semiIntermediateAxisB)',
+         primary: semiIntermediateAxisB,
+         fallback: semiMajorAxisA ?? equatorialRadius,
+       ),
+       semiMinorAxisC = _resolveAndValidateAxis(
+         axisName: 'c (semiMinorAxisC / polarRadius)',
+         primary: semiMinorAxisC,
+         fallback: polarRadius,
+       );
+
+  static Distance _resolveAndValidateAxis({
+    required String axisName,
+    Distance? primary,
+    Distance? fallback,
+  }) {
+    final dist = primary ?? fallback;
+    if (dist == null) {
+      throw ArgumentError(
+        'ReferenceSurfaceId requires an explicit definition for semi-axis $axisName.',
+      );
+    }
+    final m = dist.meters;
+    if (!m.isFinite) {
+      throw ArgumentError(
+        'ReferenceSurfaceId semi-axis $axisName must be finite. Got: $m',
+      );
+    }
+    if (m <= 0.0) {
+      throw ArgumentError(
+        'ReferenceSurfaceId semi-axis $axisName must be strictly positive (> 0). Got: $m',
+      );
+    }
+    return dist;
+  }
 
   /// Constant constructor explicitly specifying all three semi-axes ($a, b, c$).
   const ReferenceSurfaceId.triaxial({

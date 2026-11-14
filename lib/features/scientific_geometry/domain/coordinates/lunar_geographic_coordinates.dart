@@ -48,8 +48,18 @@ class LunarGeographicCoordinates {
     required this.heightReference,
     required this.frame,
   }) {
-    // 1. Validate latitude finiteness and range [-90°, +90°]
+    // 1. Validate latitude finiteness and declared range [-90°, +90°]
     final latDeg = latitude.inDegrees;
+    if (!latDeg.isFinite) {
+      throw ScientificComputationException(
+        message: 'Latitude degrees must be finite. Got: $latDeg',
+        code: 'NON_FINITE_VALUE',
+        context: {
+          'latitude_state': latDeg.isNaN ? 'NaN' : 'infinity',
+          'latitude_type': latitudeType.name,
+        },
+      );
+    }
     if (latDeg < -90.0 || latDeg > 90.0) {
       throw ScientificComputationException(
         message: 'Latitude must be within [-90.0°, +90.0°]. Got: $latDeg°',
@@ -58,8 +68,19 @@ class LunarGeographicCoordinates {
       );
     }
 
-    // 2. Validate longitude domain boundaries
+    // 2. Validate longitude finiteness and declared domain boundaries
     final lonDeg = longitude.inDegrees;
+    if (!lonDeg.isFinite) {
+      throw ScientificComputationException(
+        message: 'Longitude degrees must be finite. Got: $lonDeg',
+        code: 'NON_FINITE_VALUE',
+        context: {
+          'longitude_state': lonDeg.isNaN ? 'NaN' : 'infinity',
+          'longitude_domain': longitudeDomain.name,
+          'longitude_direction': longitudeDirection.name,
+        },
+      );
+    }
     if (longitudeDomain == LongitudeDomain.symmetric180) {
       if (lonDeg < -180.0 || lonDeg > 180.0) {
         throw ScientificComputationException(
