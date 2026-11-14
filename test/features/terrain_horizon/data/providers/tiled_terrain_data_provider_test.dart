@@ -14,11 +14,8 @@ void main() {
 
     test('Loads genuine decoded NASA LOLA BigTIFF tile from disk', () async {
       final file = File('$fixturePath/$fixtureFileName');
-      expect(
-        file.existsSync(),
-        isTrue,
-        reason: 'Authoritative test fixture must exist',
-      );
+      expect(file.existsSync(), isTrue,
+          reason: 'Authoritative test fixture must exist');
 
       final loader = DemTileLoader(baseDirectoryPath: fixturePath);
       final tile = await loader.loadTile(
@@ -52,6 +49,83 @@ void main() {
       expect(southPoleSample!, greaterThan(600.0));
       expect(southPoleSample, lessThan(1400.0));
       expect(southPoleSample, closeTo(1289.12, 1.0));
+    });
+
+    test(
+      'Pixel registration and tile boundary indexing consistency (Audit C)',
+      () async {
+        final loader = DemTileLoader(baseDirectoryPath: fixturePath);
+        final tile = await loader.loadTile(
+          tileX: 78,
+          tileY: 78,
+          metadata: DemMetadata.lolaProduct81,
+          customFileName: fixtureFileName,
+        );
+
+        final provider = TiledTerrainDataProvider(
+          metadata: DemMetadata.lolaProduct81,
+        );
+        provider.addTile(tile!);
+
+        // 1. South Pole (0, 0) meters:
+        // In Tile (78, 78): minX = -160, maxY = 160, pixelScale = 5
+        // col = (0 - (-160)) / 5 = 32.0; row = (160 - 0) / 5 = 32.0.
+        // At pixel (col 32, row 32), raw float in buffer is 1289.124 m.
+        final sampleCenter = provider.getElevation(
+          Angle.fromDegrees(-90.0),
+          Angle.fromDegrees(0.0),
+        );
+        expect(sampleCenter.isValid, isTrue);
+        expect(sampleCenter.elevationMeters, closeTo(1289.124, 0.01));
+
+        // 2. Tile edge bounds:
+        // Right edge of tile 78 is at x = 1120 m (col 256)
+        // Exactly at maxX, sample is inside tile
+        final sampleEdge = tile.sampleBilinear(1120.0, 0.0);
+        expect(sampleEdge, isNotNull);
+
+        // Just beyond maxX (e.g. 1120.1 m), tile 78 returns outsideCoverage
+        final (sampleBeyond, statusBeyond) = tile.sampleDetailed(1120.1, 0.0);
+        expect(sampleBeyond, isNull);
+        expect(statusBeyond, ElevationSampleStatus.outsideCoverage);
+      },
+    );
+
+    test('Pixel registration and tile boundary indexing consistency (Audit C)', () async {
+      final loader = DemTileLoader(baseDirectoryPath: fixturePath);
+      final tile = await loader.loadTile(
+        tileX: 78,
+        tileY: 78,
+        metadata: DemMetadata.lolaProduct81,
+        customFileName: fixtureFileName,
+      );
+
+      final provider = TiledTerrainDataProvider(
+        metadata: DemMetadata.lolaProduct81,
+      );
+      provider.addTile(tile!);
+
+      // 1. South Pole (0, 0) meters:
+      // In Tile (78, 78): minX = -160, maxY = 160, pixelScale = 5
+      // col = (0 - (-160)) / 5 = 32.0; row = (160 - 0) / 5 = 32.0.
+      // At pixel (col 32, row 32), raw float in buffer is 1289.124 m.
+      final sampleCenter = provider.getElevation(
+        Angle.fromDegrees(-90.0),
+        Angle.fromDegrees(0.0),
+      );
+      expect(sampleCenter.isValid, isTrue);
+      expect(sampleCenter.elevationMeters, closeTo(1289.124, 0.01));
+
+      // 2. Tile edge bounds:
+      // Right edge of tile 78 is at x = 1120 m (col 256)
+      // Exactly at maxX, sample is inside tile
+      final sampleEdge = tile.sampleBilinear(1120.0, 0.0);
+      expect(sampleEdge, isNotNull);
+
+      // Just beyond maxX (e.g. 1120.1 m), tile 78 returns outsideCoverage
+      final (sampleBeyond, statusBeyond) = tile.sampleDetailed(1120.1, 0.0);
+      expect(sampleBeyond, isNull);
+      expect(statusBeyond, ElevationSampleStatus.outsideCoverage);
     });
 
     test('TiledTerrainDataProvider samples correctly at South Pole using real tile', () async {

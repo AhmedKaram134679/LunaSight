@@ -9,14 +9,14 @@ void main() {
     test('valid sample holds correct properties', () {
       final sample = ElevationSample(
         elevationMeters: 1250.5,
-        status: ElevationSampleStatus.valid,
+        status: ElevationSampleStatus.validBilinear,
         latitude: Angle.fromDegrees(-89.5),
         longitude: Angle.fromDegrees(45.0),
         projectedX: 50.0,
         projectedY: 100.0,
       );
       expect(sample.isValid, isTrue);
-      expect(sample.status, ElevationSampleStatus.valid);
+      expect(sample.status, ElevationSampleStatus.validBilinear);
       expect(sample.elevationMeters, 1250.5);
       expect(sample.projectedX, 50.0);
       expect(sample.projectedY, 100.0);
@@ -35,7 +35,7 @@ void main() {
     });
   });
 
-  group('DemTile Bilinear and Nearest-Neighbor Sampling', () {
+  group('DemTile Bilinear, Nearest-Neighbor, and Quality Distinctions', () {
     late DemTile tile;
 
     setUp(() {
@@ -92,29 +92,86 @@ void main() {
       expect(sample11!, closeTo(30.0, 1e-4));
     });
 
-    test('bilinear interpolation between 4 valid points', () {
-      // Center between (0,0) [10], (1,0) [20], (0,1) [20], (1,1) [30]
-      // In pixel indices: col = 1.0, row = 1.0 is at x = 10, y = -10
-      // v00=10 (c=0,r=0), v10=20 (c=1,r=0), v01=20 (c=0,r=1), v11=30 (c=1,r=1)
-      // At x = 5.0, y = -5.0: col = 0.5, row = 0.5
-      // top = 10*0.5 + 20*0.5 = 15; bottom = 20*0.5 + 30*0.5 = 25; center = 20.0
-      final sample = tile.sampleBilinear(5.0, -5.0);
-      expect(sample, isNotNull);
-      expect(sample!, closeTo(20.0, 1e-4));
+    test(
+      'bilinear interpolation between 4 valid points returns validBilinear',
+      () {
+        // Center between (0,0) [10], (1,0) [20], (0,1) [20], (1,1) [30]
+        // In pixel indices: col = 1.0, row = 1.0 is at x = 10, y = -10
+        // At x = 5.0, y = -5.0: col = 0.5, row = 0.5
+        final (elev, status) = tile.sampleDetailed(5.0, -5.0);
+        expect(elev, isNotNull);
+        expect(elev!, closeTo(20.0, 1e-4));
+        expect(status, ElevationSampleStatus.validBilinear);
+      },
+    );
+
+    test(
+      'mixed neighborhood with NoData returns validNearestNeighbor fallback',
+      () {
+        // (col 1, row 1) = 30.0, (col 2, row 1) = 40.0, (col 1, row 2) = 40.0, (col 2, row 2) = -32768
+        // x = 12.0, y = -12.0 -> col = 1.2, row = 1.2
+        // Nearest neighbor is (col 1, row 1) which is 30.0 (valid)
+        final (elev, status) = tile.sampleDetailed(12.0, -12.0);
+        expect(elev, isNotNull);
+        expect(elev!, closeTo(30.0, 1e-4));
+        expect(status, ElevationSampleStatus.validNearestNeighbor);
+      },
+    );
+
+    test('rejection of NoData when nearest fallback is also NoData', () {
+      // (col 2, row 2) is NoData (-32768.0).
+      // At x = 25.0, y = -25.0, col = 2.5, row = 2.5.
+      // At x = 22.0, y = -22.0, col = 2.2, row = 2.2 -> nearest is (col 2, row 2) which is NoData
+      final (elev, status) = tile.sampleDetailed(22.0, -22.0);
+      expect(elev, isNull);
+      expect(status, ElevationSampleStatus.noData);
     });
 
-    test('rejection of NoData when fallback is also NoData', () {
-      // Point directly on (col 2, row 2) which is NoData (-32768.0)
-      // col = 2 -> x = 20, row = 2 -> y = -20
-      final sample = tile.sampleNearest(25.0, -25.0);
-      expect(sample, isNull);
+    test('test handling of non-finite floats (NaN, +inf, -inf)', () {
+      final bufferWithNonFinite = Float32List.fromList([
+        double.nan,
+        double.infinity,
+        double.negativeInfinity,
+        -1e35,
+      ]);
+      final nonFiniteTile = DemTile(
+        tileX: 0,
+        tileY: 0,
+        width: 2,
+        height: 2,
+        elevations: bufferWithNonFinite,
+        minX: 0.0,
+        maxX: 20.0,
+        minY: -20.0,
+        maxY: 0.0,
+        pixelScale: 10.0,
+      );
+
+      final (elevNan, statusNan) = nonFiniteTile.sampleDetailed(5.0, -5.0);
+      expect(elevNan, isNull);
+      expect(statusNan, ElevationSampleStatus.noData);
+
+      final (elevInf, statusInf) = nonFiniteTile.sampleDetailed(15.0, -5.0);
+      expect(elevInf, isNull);
+      expect(statusInf, ElevationSampleStatus.noData);
     });
 
-    test('out of bounds queries return null', () {
-      expect(tile.sampleNearest(-5.0, -20.0), isNull);
-      expect(tile.sampleBilinear(50.0, -20.0), isNull);
-      expect(tile.sampleNearest(20.0, 10.0), isNull);
-      expect(tile.sampleBilinear(20.0, -50.0), isNull);
+    test('out of bounds queries return outsideCoverage status', () {
+      final (elevLeft, statusLeft) = tile.sampleDetailed(-5.0, -20.0);
+      expect(elevLeft, isNull);
+      expect(statusLeft, ElevationSampleStatus.outsideCoverage);
+
+      final (elevRight, statusRight) = tile.sampleDetailed(50.0, -20.0);
+      expect(elevRight, isNull);
+      expect(statusRight, ElevationSampleStatus.outsideCoverage);
+
+      final (elevTop, statusTop) = tile.sampleDetailed(20.0, 10.0);
+      expect(elevTop, isNull);
+      expect(statusTop, ElevationSampleStatus.outsideCoverage);
+
+      final (elevBottom, statusBottom) = tile.sampleDetailed(20.0, -50.0);
+      expect(elevBottom, isNull);
+      expect(statusBottom, ElevationSampleStatus.outsideCoverage);
     });
   });
 }

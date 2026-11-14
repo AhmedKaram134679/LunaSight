@@ -84,11 +84,11 @@ class TiledTerrainDataProvider implements TerrainDataProvider {
         );
       }
 
-      final elev = tile.sampleBilinear(x, y);
+      final (elev, sampleStatus) = tile.sampleDetailed(x, y);
       if (elev == null) {
         return ElevationSample(
           elevationMeters: double.nan,
-          status: ElevationSampleStatus.noData,
+          status: sampleStatus,
           latitude: latitude,
           longitude: longitude,
           projectedX: x,
@@ -98,7 +98,7 @@ class TiledTerrainDataProvider implements TerrainDataProvider {
 
       return ElevationSample(
         elevationMeters: elev,
-        status: ElevationSampleStatus.valid,
+        status: sampleStatus,
         latitude: latitude,
         longitude: longitude,
         projectedX: x,

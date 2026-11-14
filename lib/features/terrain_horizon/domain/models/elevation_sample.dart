@@ -7,11 +7,23 @@ enum ElevationSampleStatus {
   /// Valid elevation measurement.
   valid,
 
+  /// Valid elevation measurement from bilinear interpolation.
+  validBilinear,
+
+  /// Valid elevation measurement from nearest-neighbor fallback (e.g. edge or mixed neighbor cell).
+  validNearestNeighbor,
+
   /// Sample lies outside available raster coverage.
   outsideCoverage,
 
   /// Sample falls on a designated NoData cell.
-  noData,
+  noData;
+
+  /// Convenience getter for any valid elevation status.
+  bool get isValid =>
+      this == ElevationSampleStatus.valid ||
+      this == ElevationSampleStatus.validBilinear ||
+      this == ElevationSampleStatus.validNearestNeighbor;
 }
 
 /// An elevation sample extracted from a digital elevation model.
@@ -41,7 +53,7 @@ class ElevationSample {
     this.projectedY,
   });
 
-  bool get isValid => status == ElevationSampleStatus.valid;
+  bool get isValid => status.isValid;
 
   static final ElevationSample outOfBounds = ElevationSample(
     elevationMeters: double.nan,
@@ -107,14 +119,12 @@ class DemTile {
     this.noDataValue,
   });
 
-  /// Samples elevation at projected coordinates (x, y) using bilinear interpolation.
-  double? sampleBilinear(double x, double y) {
+  /// Samples elevation at projected coordinates (x, y) returning both elevation and interpolation quality.
+  (double?, ElevationSampleStatus) sampleDetailed(double x, double y) {
     if (x < minX || x > maxX || y < minY || y > maxY) {
-      return null;
+      return (null, ElevationSampleStatus.outsideCoverage);
     }
 
-    // Convert (x, y) to fractional pixel coordinates (col, row)
-    // Note: Y decreases as row increases from top to bottom
     final col = (x - minX) / pixelScale;
     final row = (maxY - y) / pixelScale;
 
@@ -130,10 +140,16 @@ class DemTile {
 
     if (_isNoData(v00) || _isNoData(v10) || _isNoData(v01) || _isNoData(v11)) {
       // Nearest neighbor fallback if one neighbor is NoData
-      final nearestVal =
-          elevations[row.round().clamp(0, height - 1) * width +
-              col.round().clamp(0, width - 1)];
-      return _isNoData(nearestVal) ? null : nearestVal.toDouble();
+      final nearestCol = col.round().clamp(0, width - 1);
+      final nearestRow = row.round().clamp(0, height - 1);
+      final nearestVal = elevations[nearestRow * width + nearestCol];
+      if (_isNoData(nearestVal)) {
+        return (null, ElevationSampleStatus.noData);
+      }
+      return (
+        nearestVal.toDouble(),
+        ElevationSampleStatus.validNearestNeighbor,
+      );
     }
 
     final dx = col - c0;
@@ -142,7 +158,16 @@ class DemTile {
     final top = v00 * (1.0 - dx) + v10 * dx;
     final bottom = v01 * (1.0 - dx) + v11 * dx;
 
-    return (top * (1.0 - dy) + bottom * dy).toDouble();
+    return (
+      (top * (1.0 - dy) + bottom * dy).toDouble(),
+      ElevationSampleStatus.validBilinear,
+    );
+  }
+
+  /// Samples elevation at projected coordinates (x, y) using bilinear interpolation.
+  double? sampleBilinear(double x, double y) {
+    final (val, _) = sampleDetailed(x, y);
+    return val;
   }
 
   /// Samples elevation using nearest-neighbor.

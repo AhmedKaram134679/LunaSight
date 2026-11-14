@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:luna_sight/features/scientific_geometry/domain/coordinates/lunar_coordinate_transformer.dart';
 import 'package:luna_sight/features/scientific_geometry/domain/coordinates/lunar_geographic_coordinates.dart';
+import 'package:luna_sight/features/scientific_geometry/domain/failures/scientific_computation_exception.dart';
 import 'package:luna_sight/features/scientific_geometry/domain/quantities/angle.dart';
 import 'package:luna_sight/features/scientific_geometry/domain/value_objects/vector3.dart';
 import 'package:luna_sight/features/terrain_horizon/domain/models/elevation_sample.dart';
@@ -41,13 +42,32 @@ final class TerrainHorizonEngine {
     final obsCoords = request.observerCoordinates;
     final r0 = terrainProvider.sphereRadiusMeters;
 
+    // Validate observer coordinate height reference datum against baseline
+    obsCoords.heightReference.validateApprovedBaseline();
+
     // 1. Sample observer local surface elevation
     final obsSample = terrainProvider.getElevation(
       obsCoords.latitude,
       obsCoords.longitude,
     );
 
-    final obsSurfaceElev = obsSample.isValid ? obsSample.elevationMeters : 0.0;
+    if (!obsSample.isValid) {
+      throw ScientificComputationException(
+        message:
+            'Observer surface elevation cannot be determined from DEM: '
+            '${obsSample.status == ElevationSampleStatus.outsideCoverage ? "outside DEM coverage" : "NoData cell at observer coordinates"}.',
+        code: obsSample.status == ElevationSampleStatus.outsideCoverage
+            ? 'OBSERVER_TERRAIN_OUTSIDE_COVERAGE'
+            : 'OBSERVER_TERRAIN_NODATA',
+        context: {
+          'latitude_deg': obsCoords.latitude.inDegrees,
+          'longitude_deg': obsCoords.longitude.inDegrees,
+          'sample_status': obsSample.status.name,
+        },
+      );
+    }
+
+    final obsSurfaceElev = obsSample.elevationMeters;
     final obsTotalHeight = obsSurfaceElev + request.instrumentHeightMeters;
 
     // 2. Compute 3D Cartesian observer position in MOON_ME_DE421
@@ -90,10 +110,8 @@ final class TerrainHorizonEngine {
       northVec = proj.normalize();
     }
 
-    // Local East unit vector: East = North x Up
-    // In right-handed ENU: East x North = Up -> North x Up = East
-    // (Used to establish the local topocentric horizon coordinate triad)
-    final _ = northVec.cross(upVec).normalize();
+    // Local East unit vector: East = North x Up (in right-handed ENU, East x North = Up)
+    final eastVec = northVec.cross(upVec).normalize();
 
     // 4. Trace radial rays across requested azimuths
     final points = <HorizonPoint>[];
@@ -107,10 +125,10 @@ final class TerrainHorizonEngine {
       final azRad = azDeg * math.pi / 180.0;
 
       // Azimuth vector in horizontal plane (clockwise from North):
-      // az = 0° -> North, az = 90° -> East, az = 180° -> South, az = 270° -> West
-      // horizDir = North * cos(az) + East * sin(az)
+      // az = 0° -> North, az = 90° -> East, az = 180° -> -North (South), az = 270° -> -East (West)
       final cosAz = math.cos(azRad);
       final sinAz = math.sin(azRad);
+      final horizDir = (northVec * cosAz + eastVec * sinAz).normalize();
 
       var maxElevationAngleRad = -math.pi / 2.0; // Start at -90° (nadir)
       var controllingDistance = 0.0;
@@ -123,28 +141,18 @@ final class TerrainHorizonEngine {
       final maxDist = request.maxSearchDistanceMeters;
       final stepDist = request.radialStepSizeMeters;
 
-      // Great-circle marching:
-      // An angular distance delta = distance / r0
-      // Target latitude and longitude after distance s along azimuth az from (lat1, lon1):
-      final phi1 = obsCoords.latitude.inRadians;
-      final lam1 = obsCoords.normalizedEastLongitudeRadians;
-
       var currentDist = stepDist;
       while (currentDist <= maxDist) {
         final delta = currentDist / r0;
-
-        // Spherical great-circle forward formula:
-        final sinPhi1 = math.sin(phi1);
-        final cosPhi1 = math.cos(phi1);
-        final sinDelta = math.sin(delta);
         final cosDelta = math.cos(delta);
+        final sinDelta = math.sin(delta);
 
-        final sinPhi2 = sinPhi1 * cosDelta + cosPhi1 * sinDelta * cosAz;
-        final phi2 = math.asin(sinPhi2.clamp(-1.0, 1.0));
+        // Position on lunar sphere along geodesic tangent to horizDir:
+        final uVec = (upVec * cosDelta + horizDir * sinDelta).normalize();
 
-        final y = sinAz * sinDelta * cosPhi1;
-        final x = cosDelta - sinPhi1 * sinPhi2;
-        final lam2 = lam1 + math.atan2(y, x);
+        // Convert uVec to selenocentric latitude and longitude:
+        final phi2 = math.asin(uVec.z.clamp(-1.0, 1.0));
+        final lam2 = math.atan2(uVec.y, uVec.x);
 
         final targetLat = Angle.fromRadians(phi2);
         final targetLon = Angle.fromRadians(lam2);
@@ -158,18 +166,8 @@ final class TerrainHorizonEngine {
           final terrElev = sample.elevationMeters;
           final terrRadius = r0 + terrElev;
 
-          // 3D Cartesian position of terrain point
-          // Using spherical equations:
-          final cosPhi = math.cos(phi2);
-          final sinPhi = math.sin(phi2);
-          final cosLam = math.cos(lam2);
-          final sinLam = math.sin(lam2);
-
-          final terrVector = Vector3(
-            terrRadius * cosPhi * cosLam,
-            terrRadius * cosPhi * sinLam,
-            terrRadius * sinPhi,
-          );
+          // 3D Cartesian position of terrain point:
+          final terrVector = uVec * terrRadius;
 
           // Relative position vector from observer to terrain point:
           final relVector = terrVector - obsVector;
