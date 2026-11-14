@@ -26,41 +26,93 @@ class ReferenceSurfaceId {
   /// If [semiIntermediateAxisB] is omitted, it defaults to the equatorial semi-axis $a$.
   /// Either [semiMinorAxisC] or [polarRadius] must be provided.
   ///
-  /// Throws [ArgumentError] if required axes are missing, non-finite, zero, or negative.
+  /// Throws [ArgumentError] if [name] is empty or whitespace-only, or if required axes
+  /// are missing, non-finite, zero, or negative.
   ReferenceSurfaceId({
-    required this.name,
+    required String name,
     Distance? semiMajorAxisA,
     Distance? semiIntermediateAxisB,
     Distance? semiMinorAxisC,
     Distance? equatorialRadius,
     Distance? polarRadius,
-  }) : semiMajorAxisA = _resolveAndValidateAxis(
-         axisName: 'a (semiMajorAxisA / equatorialRadius)',
-         primary: semiMajorAxisA,
-         fallback: equatorialRadius,
-       ),
-       semiIntermediateAxisB = _resolveAndValidateAxis(
-         axisName: 'b (semiIntermediateAxisB)',
-         primary: semiIntermediateAxisB,
-         fallback: semiMajorAxisA ?? equatorialRadius,
-       ),
-       semiMinorAxisC = _resolveAndValidateAxis(
-         axisName: 'c (semiMinorAxisC / polarRadius)',
-         primary: semiMinorAxisC,
-         fallback: polarRadius,
+  }) : this._internal(
+         name: _validateName(name),
+         semiMajorAxisA: _resolveAndValidateAxis(
+           axisName: 'a (semiMajorAxisA / equatorialRadius)',
+           primary: semiMajorAxisA,
+           fallback: equatorialRadius,
+         ),
+         semiIntermediateAxisB: _resolveAndValidateAxis(
+           axisName: 'b (semiIntermediateAxisB)',
+           primary: semiIntermediateAxisB,
+           fallback: semiMajorAxisA ?? equatorialRadius,
+         ),
+         semiMinorAxisC: _resolveAndValidateAxis(
+           axisName: 'c (semiMinorAxisC / polarRadius)',
+           primary: semiMinorAxisC,
+           fallback: polarRadius,
+         ),
        );
 
-  static Distance _resolveAndValidateAxis({
-    required String axisName,
-    Distance? primary,
-    Distance? fallback,
-  }) {
-    final dist = primary ?? fallback;
-    if (dist == null) {
+  /// Validating constructor explicitly specifying all three semi-axes ($a, b, c$).
+  ///
+  /// Throws [ArgumentError] if [name] is empty or whitespace-only, or if any axis
+  /// is non-finite, zero, or negative.
+  ReferenceSurfaceId.triaxial({
+    required String name,
+    required Distance semiMajorAxisA,
+    required Distance semiIntermediateAxisB,
+    required Distance semiMinorAxisC,
+  }) : this._internal(
+         name: _validateName(name),
+         semiMajorAxisA: _validateAxisDistance(
+           'a (semiMajorAxisA)',
+           semiMajorAxisA,
+         ),
+         semiIntermediateAxisB: _validateAxisDistance(
+           'b (semiIntermediateAxisB)',
+           semiIntermediateAxisB,
+         ),
+         semiMinorAxisC: _validateAxisDistance(
+           'c (semiMinorAxisC)',
+           semiMinorAxisC,
+         ),
+       );
+
+  /// Backward-compatible constructor for two-radius surface specifications.
+  ///
+  /// Throws [ArgumentError] if [name] is empty or whitespace-only, or if either
+  /// radius is non-finite, zero, or negative.
+  ReferenceSurfaceId.twoRadius({
+    required String name,
+    required Distance equatorialRadius,
+    required Distance polarRadius,
+  }) : this(
+         name: name,
+         semiMajorAxisA: equatorialRadius,
+         semiIntermediateAxisB: equatorialRadius,
+         semiMinorAxisC: polarRadius,
+       );
+
+  /// Private unchecked constructor used internally for canonical constant initialization
+  /// and validated delegating constructors.
+  const ReferenceSurfaceId._internal({
+    required this.name,
+    required this.semiMajorAxisA,
+    required this.semiIntermediateAxisB,
+    required this.semiMinorAxisC,
+  });
+
+  static String _validateName(String rawName) {
+    if (rawName.trim().isEmpty) {
       throw ArgumentError(
-        'ReferenceSurfaceId requires an explicit definition for semi-axis $axisName.',
+        'ReferenceSurfaceId name must not be empty or whitespace-only.',
       );
     }
+    return rawName;
+  }
+
+  static Distance _validateAxisDistance(String axisName, Distance dist) {
     final m = dist.meters;
     if (!m.isFinite) {
       throw ArgumentError(
@@ -75,25 +127,19 @@ class ReferenceSurfaceId {
     return dist;
   }
 
-  /// Constant constructor explicitly specifying all three semi-axes ($a, b, c$).
-  const ReferenceSurfaceId.triaxial({
-    required this.name,
-    required this.semiMajorAxisA,
-    required this.semiIntermediateAxisB,
-    required this.semiMinorAxisC,
-  });
-
-  /// Backward-compatible constructor for two-radius surface specifications.
-  ReferenceSurfaceId.twoRadius({
-    required String name,
-    required Distance equatorialRadius,
-    required Distance polarRadius,
-  }) : this(
-         name: name,
-         semiMajorAxisA: equatorialRadius,
-         semiIntermediateAxisB: equatorialRadius,
-         semiMinorAxisC: polarRadius,
-       );
+  static Distance _resolveAndValidateAxis({
+    required String axisName,
+    Distance? primary,
+    Distance? fallback,
+  }) {
+    final dist = primary ?? fallback;
+    if (dist == null) {
+      throw ArgumentError(
+        'ReferenceSurfaceId requires an explicit definition for semi-axis $axisName.',
+      );
+    }
+    return _validateAxisDistance(axisName, dist);
+  }
 
   /// Backward-compatible getter for equatorial radius ($a$).
   Distance get equatorialRadius => semiMajorAxisA;
@@ -103,7 +149,7 @@ class ReferenceSurfaceId {
 
   /// The canonical LOLA / lunar mean spherical reference model ($a = b = c = 1,737,400\text{ m}$).
   static final ReferenceSurfaceId lunarSphere1737400 =
-      ReferenceSurfaceId.triaxial(
+      ReferenceSurfaceId._internal(
         name: 'LUNAR_SPHERE_1737400',
         semiMajorAxisA: Distance.fromMeters(1737400.0),
         semiIntermediateAxisB: Distance.fromMeters(1737400.0),
@@ -162,10 +208,25 @@ class HeightReferenceId {
   /// The reference surface against which height is measured.
   final ReferenceSurfaceId referenceSurface;
 
-  const HeightReferenceId({required this.name, required this.referenceSurface});
+  HeightReferenceId({required String name, required this.referenceSurface})
+    : name = _validateName(name);
+
+  const HeightReferenceId._internal({
+    required this.name,
+    required this.referenceSurface,
+  });
+
+  static String _validateName(String rawName) {
+    if (rawName.trim().isEmpty) {
+      throw ArgumentError(
+        'HeightReferenceId name must not be empty or whitespace-only.',
+      );
+    }
+    return rawName;
+  }
 
   /// Height defined radially relative to the canonical lunar reference sphere ($1,737,400\text{ m}$).
-  static final HeightReferenceId sphereRelative = HeightReferenceId(
+  static final HeightReferenceId sphereRelative = HeightReferenceId._internal(
     name: 'SPHERE_RELATIVE_1737400',
     referenceSurface: ReferenceSurfaceId.lunarSphere1737400,
   );

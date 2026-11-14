@@ -564,6 +564,24 @@ void main() {
       });
 
       test('ReferenceSurfaceId constructor safety and validation', () {
+        // Empty or whitespace name rejected
+        expect(
+          () => ReferenceSurfaceId(
+            name: '',
+            equatorialRadius: Distance.fromMeters(1737400.0),
+            polarRadius: Distance.fromMeters(1737400.0),
+          ),
+          throwsArgumentError,
+        );
+        expect(
+          () => ReferenceSurfaceId(
+            name: '   ',
+            equatorialRadius: Distance.fromMeters(1737400.0),
+            polarRadius: Distance.fromMeters(1737400.0),
+          ),
+          throwsArgumentError,
+        );
+
         // Missing A axis
         expect(
           () => ReferenceSurfaceId(
@@ -582,7 +600,7 @@ void main() {
           throwsArgumentError,
         );
 
-        // Zero axis rejected
+        // Zero axis rejected in primary constructor
         expect(
           () => ReferenceSurfaceId(
             name: 'ZERO_A',
@@ -601,13 +619,13 @@ void main() {
           throwsArgumentError,
         );
 
-        // Negative axis rejected (caught by Distance or constructor validator)
+        // Negative axis rejected (caught by Distance constructor)
         expect(
           () => Distance.fromMeters(-100.0),
           throwsA(isA<ScientificComputationException>()),
         );
 
-        // Non-finite axis rejected (caught by Distance or constructor validator)
+        // Non-finite axis rejected (caught by Distance constructor)
         expect(
           () => Distance.fromMeters(double.nan),
           throwsA(isA<ScientificComputationException>()),
@@ -619,6 +637,7 @@ void main() {
 
         // Valid canonical sphere
         final canonical = ReferenceSurfaceId.lunarSphere1737400;
+        expect(canonical.name, 'LUNAR_SPHERE_1737400');
         expect(canonical.semiMajorAxisA.meters, 1737400.0);
         expect(canonical.semiIntermediateAxisB.meters, 1737400.0);
         expect(canonical.semiMinorAxisC.meters, 1737400.0);
@@ -643,6 +662,182 @@ void main() {
             ),
           ),
         );
+      });
+
+      test('ReferenceSurfaceId.triaxial constructor invariant enforcement', () {
+        final dValid = Distance.fromMeters(1737400.0);
+        final dZero = Distance.fromMeters(0.0);
+
+        // Empty/whitespace name rejected
+        expect(
+          () => ReferenceSurfaceId.triaxial(
+            name: '  ',
+            semiMajorAxisA: dValid,
+            semiIntermediateAxisB: dValid,
+            semiMinorAxisC: dValid,
+          ),
+          throwsArgumentError,
+        );
+
+        // Zero in individual positions rejected
+        expect(
+          () => ReferenceSurfaceId.triaxial(
+            name: 'ZERO_A',
+            semiMajorAxisA: dZero,
+            semiIntermediateAxisB: dValid,
+            semiMinorAxisC: dValid,
+          ),
+          throwsArgumentError,
+        );
+        expect(
+          () => ReferenceSurfaceId.triaxial(
+            name: 'ZERO_B',
+            semiMajorAxisA: dValid,
+            semiIntermediateAxisB: dZero,
+            semiMinorAxisC: dValid,
+          ),
+          throwsArgumentError,
+        );
+        expect(
+          () => ReferenceSurfaceId.triaxial(
+            name: 'ZERO_C',
+            semiMajorAxisA: dValid,
+            semiIntermediateAxisB: dValid,
+            semiMinorAxisC: dZero,
+          ),
+          throwsArgumentError,
+        );
+
+        // Valid triaxial surface succeeds
+        final tri = ReferenceSurfaceId.triaxial(
+          name: 'VALID_TRIAXIAL',
+          semiMajorAxisA: Distance.fromMeters(1738000.0),
+          semiIntermediateAxisB: Distance.fromMeters(1737500.0),
+          semiMinorAxisC: Distance.fromMeters(1736000.0),
+        );
+        expect(tri.name, 'VALID_TRIAXIAL');
+        expect(tri.semiMajorAxisA.meters, 1738000.0);
+        expect(tri.semiIntermediateAxisB.meters, 1737500.0);
+        expect(tri.semiMinorAxisC.meters, 1736000.0);
+        expect(tri.isSpherical, isFalse);
+      });
+
+      test('HeightReferenceId constructor invariant enforcement', () {
+        // Empty/whitespace name rejected
+        expect(
+          () => HeightReferenceId(
+            name: '',
+            referenceSurface: ReferenceSurfaceId.lunarSphere1737400,
+          ),
+          throwsArgumentError,
+        );
+        expect(
+          () => HeightReferenceId(
+            name: '   ',
+            referenceSurface: ReferenceSurfaceId.lunarSphere1737400,
+          ),
+          throwsArgumentError,
+        );
+
+        // Valid custom height reference succeeds
+        final customRef = HeightReferenceId(
+          name: 'CUSTOM_DATUM',
+          referenceSurface: ReferenceSurfaceId.lunarSphere1737400,
+        );
+        expect(customRef.name, 'CUSTOM_DATUM');
+        expect(
+          customRef.referenceSurface,
+          ReferenceSurfaceId.lunarSphere1737400,
+        );
+      });
+
+      test('ReferenceSurfaceId and HeightReferenceId value equality and hashCode contract', () {
+        // Canonical lunar reference surface
+        final s1 = ReferenceSurfaceId.lunarSphere1737400;
+        final s2 = ReferenceSurfaceId.triaxial(
+          name: 'LUNAR_SPHERE_1737400',
+          semiMajorAxisA: Distance.fromMeters(1737400.0),
+          semiIntermediateAxisB: Distance.fromMeters(1737400.0),
+          semiMinorAxisC: Distance.fromMeters(1737400.0),
+        );
+        final s3 = ReferenceSurfaceId(
+          name: 'LUNAR_SPHERE_1737400',
+          equatorialRadius: Distance.fromMeters(1737400.0),
+          polarRadius: Distance.fromMeters(1737400.0),
+        );
+
+        // Value equality across independently constructed equivalent instances
+        expect(s1 == s2, isTrue);
+        expect(s2 == s1, isTrue);
+        expect(s1 == s3, isTrue);
+        expect(s1.hashCode, equals(s2.hashCode));
+        expect(s1.hashCode, equals(s3.hashCode));
+
+        // Separately constructed instance satisfies approved baseline validation
+        expect(() => s2.validateSphericalBaseline(), returnsNormally);
+        expect(() => s3.validateSphericalBaseline(), returnsNormally);
+
+        // Differing only by name
+        final diffName = ReferenceSurfaceId.triaxial(
+          name: 'DIFFERENT_NAME',
+          semiMajorAxisA: Distance.fromMeters(1737400.0),
+          semiIntermediateAxisB: Distance.fromMeters(1737400.0),
+          semiMinorAxisC: Distance.fromMeters(1737400.0),
+        );
+        expect(s1 == diffName, isFalse);
+        expect(s1.hashCode == diffName.hashCode, isFalse);
+
+        // Differing only in axis A
+        final diffA = ReferenceSurfaceId.triaxial(
+          name: 'LUNAR_SPHERE_1737400',
+          semiMajorAxisA: Distance.fromMeters(1737401.0),
+          semiIntermediateAxisB: Distance.fromMeters(1737400.0),
+          semiMinorAxisC: Distance.fromMeters(1737400.0),
+        );
+        expect(s1 == diffA, isFalse);
+
+        // Differing only in axis B
+        final diffB = ReferenceSurfaceId.triaxial(
+          name: 'LUNAR_SPHERE_1737400',
+          semiMajorAxisA: Distance.fromMeters(1737400.0),
+          semiIntermediateAxisB: Distance.fromMeters(1737401.0),
+          semiMinorAxisC: Distance.fromMeters(1737400.0),
+        );
+        expect(s1 == diffB, isFalse);
+
+        // Differing only in axis C
+        final diffC = ReferenceSurfaceId.triaxial(
+          name: 'LUNAR_SPHERE_1737400',
+          semiMajorAxisA: Distance.fromMeters(1737400.0),
+          semiIntermediateAxisB: Distance.fromMeters(1737400.0),
+          semiMinorAxisC: Distance.fromMeters(1737401.0),
+        );
+        expect(s1 == diffC, isFalse);
+
+        // HeightReferenceId value equality
+        final h1 = HeightReferenceId.sphereRelative;
+        final h2 = HeightReferenceId(
+          name: 'SPHERE_RELATIVE_1737400',
+          referenceSurface: s2,
+        );
+        expect(h1 == h2, isTrue);
+        expect(h1.hashCode, equals(h2.hashCode));
+        expect(() => h2.validateApprovedBaseline(), returnsNormally);
+
+        // Height references differing only by name
+        final hDiffName = HeightReferenceId(
+          name: 'OTHER_NAME',
+          referenceSurface: ReferenceSurfaceId.lunarSphere1737400,
+        );
+        expect(h1 == hDiffName, isFalse);
+        expect(h1.hashCode == hDiffName.hashCode, isFalse);
+
+        // Height references differing only by reference surface
+        final hDiffSurface = HeightReferenceId(
+          name: 'SPHERE_RELATIVE_1737400',
+          referenceSurface: diffName,
+        );
+        expect(h1 == hDiffSurface, isFalse);
       });
 
       test('Rejects unsupported reference frame realization', () {
