@@ -45,6 +45,24 @@ final class TerrainHorizonEngine {
     // Validate observer coordinate height reference datum against baseline
     obsCoords.heightReference.validateApprovedBaseline();
 
+    // Validate that observerCoordinates.heightMeters adheres to the horizontal surface-location contract (Option A):
+    // In Phase 05, surface observer location is defined horizontally by latitude and longitude.
+    // The surface elevation must be sourced authoritatively from the DEM datum rather than an unverified coordinate height.
+    if (obsCoords.heightMeters.abs() > 1e-4) {
+      throw ScientificComputationException(
+        message:
+            'Observer coordinates for TerrainHorizonEngine must specify heightMeters == 0.0 '
+            '(surface location). Surface elevation is determined authoritatively by the DEM. '
+            'Got heightMeters: ${obsCoords.heightMeters} m.',
+        code: 'OBSERVER_NONZERO_HEIGHT_METERS',
+        context: {
+          'latitude_deg': obsCoords.latitude.inDegrees,
+          'longitude_deg': obsCoords.longitude.inDegrees,
+          'height_meters': obsCoords.heightMeters,
+        },
+      );
+    }
+
     // 1. Sample observer local surface elevation
     final obsSample = terrainProvider.getElevation(
       obsCoords.latitude,

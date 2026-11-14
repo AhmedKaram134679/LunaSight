@@ -78,10 +78,12 @@ where $\lambda$ is normalized to $[0, 2\pi)$ or $[-\pi, \pi]$.
 
 ## 4. Horizon Calculation & Ray-Marching Engine
 
-### 1. Observer Positioning & Local Topocentric Frame
+### 1. Observer Positioning, Height Contract & Local Topocentric Frame
 Given observer geographic coordinates $(\phi_{\text{obs}}, \lambda_{\text{obs}})$ and instrument height $h_{\text{inst}}$:
-- The local DEM elevation $H_{\text{obs}}$ is queried. If $H_{\text{obs}}$ is outside coverage or NoData, computation is halted with an explicit `ScientificComputationException`.
-- Total observer height relative to reference sphere:
+- **Observer Height Contract (Option A — Horizontal Location Only)**:
+  `request.observerCoordinates` specifies the horizontal position on the lunar body. The Phase 04C `heightMeters` property must equal $0.0\text{ m}$ (within $10^{-4}\text{ m}$ numerical tolerance); any nonzero coordinate height is strictly rejected with a typed `ScientificComputationException(code: 'OBSERVER_NONZERO_HEIGHT_METERS')`. The observer's surface elevation $H_{\text{obs}}$ is queried authoritatively from the DEM provider, preventing unverified or duplicate height definitions.
+- If $H_{\text{obs}}$ is outside coverage or NoData, computation is halted with an explicit `ScientificComputationException` (`OBSERVER_TERRAIN_OUTSIDE_COVERAGE` or `OBSERVER_TERRAIN_NODATA`).
+- Total observer height relative to the reference sphere:
   $$h_{\text{total}} = H_{\text{obs}} + h_{\text{inst}}$$
   $$r_{\text{obs}} = R + h_{\text{total}}$$
 - The 3D Cartesian position vector of the observer in Moon-centered body-fixed coordinates (`MOON_ME_DE421`) is:
@@ -161,10 +163,10 @@ lib/features/terrain_horizon/
 | :--- | :--- | :--- | :--- | :--- |
 | **Projection Math** | `south_polar_stereographic_test.dart` | 3 | South Pole (0,0), cardinal quadrants, forward-inverse roundtrip | Passed |
 | **Elevation Sampling** | `elevation_sample_test.dart` | 9 | Bilinear interpolation, nearest neighbor, sampleDetailed quality status, non-finite floats, NoData rejection, out of bounds | Passed |
-| **Horizon Ray-Casting** | `terrain_horizon_engine_test.dart` | 9 | Analytical curvature dip $\theta \approx -\sqrt{2h/R}$, isolated peak, obstacle occlusion, instrument height, observer outside coverage/NoData rejection, height reference validation, polar azimuth basis invariance | Passed |
-| **Real LOLA Data** | `tiled_terrain_data_provider_test.dart` | 4 | Ingestion of real NASA LOLA South Pole Tile 78_78 fixture, pixel registration at South Pole (0,0), tile edge boundaries, corrupt file rejection | Passed |
+| **Horizon Ray-Casting** | `terrain_horizon_engine_test.dart` | 10 | Analytical curvature dip $\theta \approx -\sqrt{2h/R}$, isolated peak, obstacle occlusion, instrument height, observer outside coverage/NoData rejection, Option A observer heightMeters rejection, height reference validation, polar azimuth basis invariance | Passed |
+| **Real LOLA Data** | `tiled_terrain_data_provider_test.dart` | 7 | Ingestion of real NASA LOLA South Pole Tile 78_78 fixture, pixel registration at South Pole (0,0), tile edge boundaries, multi-tile selection across boundaries, corrupt file rejection | Passed |
 | **Phase 01–04 Regression**| `test/features/scientific_geometry/` | 106 | Complete preservation of scientific geometry invariants | Passed |
-| **Full Repository** | `flutter test` | 234 | All unit, widget, compile-time, and integration tests across entire repository | Passed |
+| **Full Repository** | `flutter test` | 238 | All unit, widget, compile-time, and integration tests across entire repository | Passed |
 
 ---
 

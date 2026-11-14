@@ -311,6 +311,47 @@ void main() {
       expect(profile.observerTotalElevationMeters, closeTo(1202.5, 1e-4));
     });
 
+    test('Rejects nonzero heightMeters on observerCoordinates under Option A contract', () {
+      final provider = SyntheticTerrainProvider((lat, lon) => 1200.0);
+      final engine = TerrainHorizonEngine(terrainProvider: provider);
+
+      // Positive height:
+      final observerPos = createTestObserver(
+        latitudeDeg: -89.9,
+        longitudeDeg: 0.0,
+        heightMeters: 50.0,
+      );
+      final reqPos = HorizonProfileRequest(observerCoordinates: observerPos);
+      expect(
+        () => engine.calculateHorizon(reqPos),
+        throwsA(
+          isA<ScientificComputationException>().having(
+            (e) => e.code,
+            'code',
+            'OBSERVER_NONZERO_HEIGHT_METERS',
+          ),
+        ),
+      );
+
+      // Negative height:
+      final observerNeg = createTestObserver(
+        latitudeDeg: -89.9,
+        longitudeDeg: 0.0,
+        heightMeters: -50.0,
+      );
+      final reqNeg = HorizonProfileRequest(observerCoordinates: observerNeg);
+      expect(
+        () => engine.calculateHorizon(reqNeg),
+        throwsA(
+          isA<ScientificComputationException>().having(
+            (e) => e.code,
+            'code',
+            'OBSERVER_NONZERO_HEIGHT_METERS',
+          ),
+        ),
+      );
+    });
+
     test('Rejects incompatible height reference on observer coordinates at construction', () {
       final customSurface = ReferenceSurfaceId(
         name: 'CUSTOM_SPHERE',

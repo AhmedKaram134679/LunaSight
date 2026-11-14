@@ -95,34 +95,37 @@ void main() {
     test(
       'bilinear interpolation between 4 valid points returns validBilinear',
       () {
-        // Center between (0,0) [10], (1,0) [20], (0,1) [20], (1,1) [30]
-        // In pixel indices: col = 1.0, row = 1.0 is at x = 10, y = -10
-        // At x = 5.0, y = -5.0: col = 0.5, row = 0.5
-        final (elev, status) = tile.sampleDetailed(5.0, -5.0);
+        // Pixel centers under PixelIsArea:
+        // (c0, r0) = (0, 0) center is at (5.0, -5.0) [elevation 10]
+        // (c1, r0) = (1, 0) center is at (15.0, -5.0) [elevation 20]
+        // (c0, r1) = (0, 1) center is at (5.0, -15.0) [elevation 20]
+        // (c1, r1) = (1, 1) center is at (15.0, -15.0) [elevation 30]
+        // Midpoint between these 4 pixel centers is at x = 10.0, y = -10.0 (col = 0.5, row = 0.5):
+        // Expected bilinear value = (10 + 20 + 20 + 30) / 4 = 20.0
+        final (elev, status) = tile.sampleDetailed(10.0, -10.0);
         expect(elev, isNotNull);
         expect(elev!, closeTo(20.0, 1e-4));
         expect(status, ElevationSampleStatus.validBilinear);
       },
     );
 
-    test(
-      'mixed neighborhood with NoData returns validNearestNeighbor fallback',
-      () {
-        // (col 1, row 1) = 30.0, (col 2, row 1) = 40.0, (col 1, row 2) = 40.0, (col 2, row 2) = -32768
-        // x = 12.0, y = -12.0 -> col = 1.2, row = 1.2
-        // Nearest neighbor is (col 1, row 1) which is 30.0 (valid)
-        final (elev, status) = tile.sampleDetailed(12.0, -12.0);
-        expect(elev, isNotNull);
-        expect(elev!, closeTo(30.0, 1e-4));
-        expect(status, ElevationSampleStatus.validNearestNeighbor);
-      },
-    );
+    test('mixed neighborhood with NoData returns validNearestNeighbor fallback', () {
+      // (col 1, row 1) center = (15, -15) [30.0]
+      // (col 2, row 1) center = (25, -15) [40.0]
+      // (col 1, row 2) center = (15, -25) [40.0]
+      // (col 2, row 2) center = (25, -25) [-32768 NoData]
+      // Query at x = 17.0, y = -17.0 -> col = 0.9, row = 0.9 in 4-neighborhood
+      // Nearest pixel center is (15, -15) which is (col 1, row 1) with elevation 30.0
+      final (elev, status) = tile.sampleDetailed(17.0, -17.0);
+      expect(elev, isNotNull);
+      expect(elev!, closeTo(30.0, 1e-4));
+      expect(status, ElevationSampleStatus.validNearestNeighbor);
+    });
 
     test('rejection of NoData when nearest fallback is also NoData', () {
-      // (col 2, row 2) is NoData (-32768.0).
-      // At x = 25.0, y = -25.0, col = 2.5, row = 2.5.
-      // At x = 22.0, y = -22.0, col = 2.2, row = 2.2 -> nearest is (col 2, row 2) which is NoData
-      final (elev, status) = tile.sampleDetailed(22.0, -22.0);
+      // (col 2, row 2) center is at x = 25.0, y = -25.0, which is NoData (-32768.0).
+      // Query at x = 25.0, y = -25.0
+      final (elev, status) = tile.sampleDetailed(25.0, -25.0);
       expect(elev, isNull);
       expect(status, ElevationSampleStatus.noData);
     });

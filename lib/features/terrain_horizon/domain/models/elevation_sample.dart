@@ -120,13 +120,18 @@ class DemTile {
   });
 
   /// Samples elevation at projected coordinates (x, y) returning both elevation and interpolation quality.
+  ///
+  /// Conforms to GeoTIFF PixelIsArea semantics:
+  /// Continuous sample array coordinates are centered at half-pixel offsets from outer cell edges:
+  /// $$c = \frac{x - \text{minX}}{\text{pixelScale}} - 0.5$$
+  /// $$r = \frac{\text{maxY} - y}{\text{pixelScale}} - 0.5$$
   (double?, ElevationSampleStatus) sampleDetailed(double x, double y) {
     if (x < minX || x > maxX || y < minY || y > maxY) {
       return (null, ElevationSampleStatus.outsideCoverage);
     }
 
-    final col = (x - minX) / pixelScale;
-    final row = (maxY - y) / pixelScale;
+    final col = (x - minX) / pixelScale - 0.5;
+    final row = (maxY - y) / pixelScale - 0.5;
 
     final c0 = col.floor().clamp(0, width - 1);
     final r0 = row.floor().clamp(0, height - 1);
@@ -170,13 +175,13 @@ class DemTile {
     return val;
   }
 
-  /// Samples elevation using nearest-neighbor.
+  /// Samples elevation using nearest-neighbor under PixelIsArea semantics.
   double? sampleNearest(double x, double y) {
     if (x < minX || x > maxX || y < minY || y > maxY) {
       return null;
     }
-    final col = ((x - minX) / pixelScale).floor().clamp(0, width - 1);
-    final row = ((maxY - y) / pixelScale).floor().clamp(0, height - 1);
+    final col = ((x - minX) / pixelScale - 0.5).round().clamp(0, width - 1);
+    final row = ((maxY - y) / pixelScale - 0.5).round().clamp(0, height - 1);
 
     final val = elevations[row * width + col];
     return _isNoData(val) ? null : val.toDouble();
