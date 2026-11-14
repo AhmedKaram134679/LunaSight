@@ -125,6 +125,13 @@ class DemTile {
   /// Continuous sample array coordinates are centered at half-pixel offsets from outer cell edges:
   /// $$c = \frac{x - \text{minX}}{\text{pixelScale}} - 0.5$$
   /// $$r = \frac{\text{maxY} - y}{\text{pixelScale}} - 0.5$$
+  ///
+  /// Mathematical interpolation domain:
+  /// Valid bilinear interpolation is defined strictly within the convex hull of available pixel centers:
+  /// $$c \in [0, \text{width} - 1] \quad \text{and} \quad r \in [0, \text{height} - 1]$$
+  /// Outside this domain (the outer half-pixel border $[ -0.5, 0 )$ or $( \text{width} - 1, \text{width} - 0.5 ]$),
+  /// a full $2 \times 2$ neighborhood does not exist within the tile. Bilinear extrapolation is strictly rejected,
+  /// and the engine falls back to [ElevationSampleStatus.validNearestNeighbor] using the nearest available pixel center.
   (double?, ElevationSampleStatus) sampleDetailed(double x, double y) {
     if (x < minX || x > maxX || y < minY || y > maxY) {
       return (null, ElevationSampleStatus.outsideCoverage);
@@ -133,20 +140,16 @@ class DemTile {
     final col = (x - minX) / pixelScale - 0.5;
     final row = (maxY - y) / pixelScale - 0.5;
 
-    final c0 = col.floor().clamp(0, width - 1);
-    final r0 = row.floor().clamp(0, height - 1);
-    final c1 = (c0 + 1).clamp(0, width - 1);
-    final r1 = (r0 + 1).clamp(0, height - 1);
+    // Nearest neighbor pixel index
+    final nearestCol = col.round().clamp(0, width - 1);
+    final nearestRow = row.round().clamp(0, height - 1);
 
-    final v00 = elevations[r0 * width + c0];
-    final v10 = elevations[r0 * width + c1];
-    final v01 = elevations[r1 * width + c0];
-    final v11 = elevations[r1 * width + c1];
+    // If query point lies outside the interior bilinear convex hull of pixel centers,
+    // fallback to nearest neighbor to prevent invalid extrapolation.
+    final isEdgeBorder =
+        col < 0.0 || col > (width - 1) || row < 0.0 || row > (height - 1);
 
-    if (_isNoData(v00) || _isNoData(v10) || _isNoData(v01) || _isNoData(v11)) {
-      // Nearest neighbor fallback if one neighbor is NoData
-      final nearestCol = col.round().clamp(0, width - 1);
-      final nearestRow = row.round().clamp(0, height - 1);
+    if (isEdgeBorder) {
       final nearestVal = elevations[nearestRow * width + nearestCol];
       if (_isNoData(nearestVal)) {
         return (null, ElevationSampleStatus.noData);
@@ -157,8 +160,33 @@ class DemTile {
       );
     }
 
-    final dx = col - c0;
-    final dy = row - r0;
+    // Inside bilinear domain: c0 in [0, width - 2], r0 in [0, height - 2]
+    // Note: When col == width - 1 exactly, c0 would be width - 1; in that boundary case,
+    // (col - c0) == 0.0, evaluating to the exact column sample.
+    final c0 = col.floor().clamp(0, width - 2);
+    final r0 = row.floor().clamp(0, height - 2);
+    final c1 = c0 + 1;
+    final r1 = r0 + 1;
+
+    final v00 = elevations[r0 * width + c0];
+    final v10 = elevations[r0 * width + c1];
+    final v01 = elevations[r1 * width + c0];
+    final v11 = elevations[r1 * width + c1];
+
+    if (_isNoData(v00) || _isNoData(v10) || _isNoData(v01) || _isNoData(v11)) {
+      // Nearest neighbor fallback if one neighbor is NoData
+      final nearestVal = elevations[nearestRow * width + nearestCol];
+      if (_isNoData(nearestVal)) {
+        return (null, ElevationSampleStatus.noData);
+      }
+      return (
+        nearestVal.toDouble(),
+        ElevationSampleStatus.validNearestNeighbor,
+      );
+    }
+
+    final dx = (col - c0).clamp(0.0, 1.0);
+    final dy = (row - r0).clamp(0.0, 1.0);
 
     final top = v00 * (1.0 - dx) + v10 * dx;
     final bottom = v01 * (1.0 - dx) + v11 * dx;

@@ -311,44 +311,85 @@ void main() {
       expect(profile.observerTotalElevationMeters, closeTo(1202.5, 1e-4));
     });
 
-    test('Rejects nonzero heightMeters on observerCoordinates under Option A contract', () {
+    test('Observer height tolerance enforcement around 1e-4 boundary and physical radius derivation under Option A', () {
       final provider = SyntheticTerrainProvider((lat, lon) => 1200.0);
       final engine = TerrainHorizonEngine(terrainProvider: provider);
 
-      // Positive height:
-      final observerPos = createTestObserver(
-        latitudeDeg: -89.9,
-        longitudeDeg: 0.0,
-        heightMeters: 50.0,
-      );
-      final reqPos = HorizonProfileRequest(observerCoordinates: observerPos);
-      expect(
-        () => engine.calculateHorizon(reqPos),
-        throwsA(
-          isA<ScientificComputationException>().having(
-            (e) => e.code,
-            'code',
-            'OBSERVER_NONZERO_HEIGHT_METERS',
-          ),
-        ),
-      );
+      // Boundary values within tolerance: abs(h) <= 1e-4
+      for (final h in [0.0, 5e-5, -5e-5, 1e-4, -1e-4]) {
+        final obs = createTestObserver(
+          latitudeDeg: -89.9,
+          longitudeDeg: 0.0,
+          heightMeters: h,
+        );
+        final req = HorizonProfileRequest(
+          observerCoordinates: obs,
+          instrumentHeightMeters: 2.5,
+          maxSearchDistanceMeters: 1000.0,
+          azimuthCount: 4,
+        );
+        final profile = engine.calculateHorizon(req);
+        expect(
+          profile.observerSurfaceElevationMeters,
+          closeTo(1200.0, 1e-4),
+          reason: 'Observer surface elevation must be 1200.0m for h=$h',
+        );
+        expect(
+          profile.observerTotalElevationMeters,
+          closeTo(1202.5, 1e-4),
+          reason: 'Total elevation must be DEM (1200m) + instrument (2.5m)',
+        );
+      }
 
-      // Negative height:
-      final observerNeg = createTestObserver(
+      // Boundary values just beyond tolerance: abs(h) > 1e-4
+      for (final h in [1.001e-4, -1.001e-4, 1e-3, -1e-3, 50.0, -50.0]) {
+        final obs = createTestObserver(
+          latitudeDeg: -89.9,
+          longitudeDeg: 0.0,
+          heightMeters: h,
+        );
+        final req = HorizonProfileRequest(
+          observerCoordinates: obs,
+          instrumentHeightMeters: 2.5,
+          maxSearchDistanceMeters: 1000.0,
+          azimuthCount: 4,
+        );
+        expect(
+          () => engine.calculateHorizon(req),
+          throwsA(
+            isA<ScientificComputationException>().having(
+              (e) => e.code,
+              'code',
+              'OBSERVER_NONZERO_HEIGHT_METERS',
+            ),
+          ),
+          reason:
+              'Observer height h=$h should be rejected by Option A contract',
+        );
+      }
+
+      // Verification of physical radius derivation:
+      // r_obs = R_moon + H_obs + h_inst
+      // R_moon = 1,737,400 m, H_obs = 1,200 m, h_inst = 2.5 m => r_obs = 1,738,602.5 m
+      final normalObs = createTestObserver(
         latitudeDeg: -89.9,
         longitudeDeg: 0.0,
-        heightMeters: -50.0,
+        heightMeters: 0.0,
       );
-      final reqNeg = HorizonProfileRequest(observerCoordinates: observerNeg);
-      expect(
-        () => engine.calculateHorizon(reqNeg),
-        throwsA(
-          isA<ScientificComputationException>().having(
-            (e) => e.code,
-            'code',
-            'OBSERVER_NONZERO_HEIGHT_METERS',
-          ),
+      final profile = engine.calculateHorizon(
+        HorizonProfileRequest(
+          observerCoordinates: normalObs,
+          instrumentHeightMeters: 2.5,
+          maxSearchDistanceMeters: 1000.0,
+          azimuthCount: 4,
         ),
+      );
+      final expectedRadius = 1737400.0 + 1200.0 + 2.5;
+      expect(
+        profile.observerTotalElevationMeters + 1737400.0,
+        closeTo(expectedRadius, 1e-4),
+        reason:
+            'Physical radius must strictly follow r_obs = R + H_obs + h_inst',
       );
     });
 

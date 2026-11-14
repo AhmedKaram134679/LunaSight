@@ -176,5 +176,67 @@ void main() {
       expect(elevBottom, isNull);
       expect(statusBottom, ElevationSampleStatus.outsideCoverage);
     });
+
+    test('edge-border queries fall back to nearest neighbor without invalid extrapolation (Critical Issue A)', () {
+      // Tile bounds: minX = 0, maxX = 40, minY = -40, maxY = 0, pixelScale = 10.
+      // Pixel centers:
+      // c=0 center at x = 5.0; c=3 center at x = 35.0.
+      // r=0 center at y = -5.0; r=3 center at y = -35.0.
+      // Outer border regions:
+      // x in [0.0, 5.0) -> col in [-0.5, 0.0) -> nearest is c=0
+      // x in (35.0, 40.0] -> col in (3.0, 3.5] -> nearest is c=3
+      // y in (-5.0, 0.0] -> row in [-0.5, 0.0) -> nearest is r=0
+      // y in [-40.0, -35.0) -> row in (3.0, 3.5] -> nearest is r=3
+
+      // 1. Exact outer left boundary: x = 0.0, y = -10.0 (col = -0.5, row = 0.5)
+      // Nearest pixel is (c0, r0) or (c0, r1) depending on row. At y = -10.0, row = 0.5 (midway between r=0 and r=1)
+      final (elevLeftEdge, statusLeftEdge) = tile.sampleDetailed(0.0, -10.0);
+      expect(elevLeftEdge, isNotNull);
+      expect(statusLeftEdge, ElevationSampleStatus.validNearestNeighbor);
+
+      // 2. Exact outer right boundary: x = 40.0, y = -10.0 (col = 3.5, row = 0.5)
+      final (elevRightEdge, statusRightEdge) = tile.sampleDetailed(40.0, -10.0);
+      expect(elevRightEdge, isNotNull);
+      expect(statusRightEdge, ElevationSampleStatus.validNearestNeighbor);
+
+      // 3. Exact outer upper boundary: x = 10.0, y = 0.0 (col = 0.5, row = -0.5)
+      final (elevTopEdge, statusTopEdge) = tile.sampleDetailed(10.0, 0.0);
+      expect(elevTopEdge, isNotNull);
+      expect(statusTopEdge, ElevationSampleStatus.validNearestNeighbor);
+
+      // 4. Exact outer lower boundary: x = 10.0, y = -40.0 (col = 0.5, row = 3.5)
+      final (elevBottomEdge, statusBottomEdge) = tile.sampleDetailed(
+        10.0,
+        -40.0,
+      );
+      expect(elevBottomEdge, isNotNull);
+      expect(statusBottomEdge, ElevationSampleStatus.validNearestNeighbor);
+
+      // 5. Half-pixel positions: exactly at pixel centers (5.0, -5.0) is within bilinear hull [c=0, r=0]
+      final (elevFirstCenter, statusFirstCenter) = tile.sampleDetailed(
+        5.0,
+        -5.0,
+      );
+      expect(elevFirstCenter, isNotNull);
+      expect(elevFirstCenter, closeTo(10.0, 1e-4));
+      // At pixel center c=0, r=0, boundary of bilinear hull:
+      expect(statusFirstCenter, ElevationSampleStatus.validBilinear);
+
+      // 6. Coordinates just inside extent: x = 0.01, y = -0.01 (falls in border, nearest neighbor)
+      final (elevJustInside, statusJustInside) = tile.sampleDetailed(
+        0.01,
+        -0.01,
+      );
+      expect(elevJustInside, isNotNull);
+      expect(statusJustInside, ElevationSampleStatus.validNearestNeighbor);
+
+      // 7. Coordinates just outside extent: x = -0.01 (outside coverage)
+      final (elevJustOutside, statusJustOutside) = tile.sampleDetailed(
+        -0.01,
+        -10.0,
+      );
+      expect(elevJustOutside, isNull);
+      expect(statusJustOutside, ElevationSampleStatus.outsideCoverage);
+    });
   });
 }

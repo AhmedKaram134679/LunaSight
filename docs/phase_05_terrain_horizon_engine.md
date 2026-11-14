@@ -37,7 +37,29 @@ Calculating terrain horizons is critical for lunar landing site evaluation, surf
 - **Offline Extraction vs Runtime Ingestion**:
   - *Offline Extraction*: A dedicated pre-processing pipeline fetches requested tile offsets via HTTP Range requests from NASA PGDA, decompresses the zlib streams, undifferences the floating-point byte planes, and outputs raw Float32 little-endian tile binaries ($256 \times 256 \times 4 = 262,144$ bytes).
   - *Runtime Ingestion*: `DemTileLoader` reads local pre-decoded binary tile files, validates file sizes, and populates `DemTile` instances into `TiledTerrainDataProvider`. Direct BigTIFF parsing is NOT performed at application runtime.
-- **Authoritative South Pole Test Fixture**: Decoded binary tile covering $(0, 0)\text{ m}$ (South Pole) stored at `test/fixtures/terrain/lola_south_pole_tile_78_78.bin` (262,144 bytes, 65,536 Float32 samples).
+- **Authoritative South Pole Test Fixture**:
+  - *Location*: `test/fixtures/terrain/lola_south_pole_tile_78_78.bin` (262,144 bytes, 65,536 Float32 samples).
+  - *SHA-256*: `ae72c611bb4435c41c7f984dc695aedabdbdd75d22c452afa7fb15963d02ff1e`.
+  - *Exact Source*: Tile column 78, Tile row 78 (linear tile index $78 \times 157 + 78 = 12,324$).
+  - *Container Offsets*: Tag 324 (TileOffsets) offset 197,624 bytes $\to$ entry offset 296,216 bytes (`value: 70,248,340`). Tag 325 (TileByteCounts) offset 432 bytes $\to$ entry offset 98,976 bytes (`value: 137,823`).
+  - *Reproducibility Tool*: Fully documented and verified in `tool/verify_lola_fixture.py`.
+  - *Scientific Rigor Distinction*: Byte equivalence confirms exact decompression fidelity and bitwise equivalence to the remote sensing archive stream; georeferenced spatial accuracy is separately validated against NASA LOLA south polar tie points and crater elevation profiles.
+
+### Raster Pixel Registration & Tile Border Interpolation Semantics
+- **Pixel Registration (`RasterPixelIsArea`)**:
+  - In NASA LOLA Product 81 GeoTIFF, pixels represent area cells with pixel size $s_x = s_y = 5.0\text{ m}$.
+  - The continuous array column and row coordinate mapping for point $(x, y)$ is:
+    $$c = \frac{x - x_{\min}}{s_x} - 0.5,\quad r = \frac{y_{\max} - y}{s_y} - 0.5$$
+  - Cell centers fall at integer continuous indices ($c \in \{0, 1, \dots, \text{width}-1\}$).
+- **Convex Hull Bilinear Interpolation & Tile Edge Fallback**:
+  - Valid bilinear interpolation requires all four bounding grid points to enclose the query point within their convex hull: $c \in [0, \text{width}-1]$ and $r \in [0, \text{height}-1]$.
+  - If a query point falls in the outer half-pixel border ($c < 0$, $c > \text{width}-1$, $r < 0$, or $r > \text{height}-1$), interpolation weights would extrapolate outside $[0, 1]$ (negative weights).
+  - The engine strictly detects this condition and falls back to nearest-neighbor sampling, assigning `ElevationSampleStatus.validNearestNeighbor` to avoid artificial slope or elevation ringing at tile boundaries.
+- **Provider Shared Tile Boundary Policy**:
+  - Multi-tile spatial indexing uses floor division on projected coordinates:
+    $$\text{tileCol} = \lfloor x / \text{tileWidthMeters} \rfloor,\quad \text{tileRow} = \lfloor y / \text{tileHeightMeters} \rfloor$$
+  - Half-open intervals $[X_0, X_1)$ govern tile ownership: a query on the shared boundary $X = X_1$ is deterministically routed to the adjacent tile $[X_1, X_2)$.
+  - Tile loading order invariance is proven by multi-tile tests verifying identical sample retrieval regardless of ingestion order. In the absence of a neighboring tile, sampling at the boundary returns `ElevationSampleStatus.outsideCoverage` without throwing exceptions.
 
 ### Secondary Global Dataset: LOLA Product 78 (`ldem_128`)
 - **Origin**: PDS Geosciences Node / NASA GSFC.
@@ -81,11 +103,11 @@ where $\lambda$ is normalized to $[0, 2\pi)$ or $[-\pi, \pi]$.
 ### 1. Observer Positioning, Height Contract & Local Topocentric Frame
 Given observer geographic coordinates $(\phi_{\text{obs}}, \lambda_{\text{obs}})$ and instrument height $h_{\text{inst}}$:
 - **Observer Height Contract (Option A — Horizontal Location Only)**:
-  `request.observerCoordinates` specifies the horizontal position on the lunar body. The Phase 04C `heightMeters` property must equal $0.0\text{ m}$ (within $10^{-4}\text{ m}$ numerical tolerance); any nonzero coordinate height is strictly rejected with a typed `ScientificComputationException(code: 'OBSERVER_NONZERO_HEIGHT_METERS')`. The observer's surface elevation $H_{\text{obs}}$ is queried authoritatively from the DEM provider, preventing unverified or duplicate height definitions.
+  `request.observerCoordinates` specifies the horizontal position on the lunar body. The Phase 04C `heightMeters` property must equal $0.0\text{ m}$ within a strict tolerance of $|h| \le 10^{-4}\text{ m}$ ($0.1\text{ mm}$); any coordinate height exceeding this tolerance is strictly rejected with a typed `ScientificComputationException(code: 'OBSERVER_NONZERO_HEIGHT_METERS')`. The observer's surface elevation $H_{\text{obs}}$ is queried authoritatively from the DEM provider, preventing unverified or duplicate height definitions.
 - If $H_{\text{obs}}$ is outside coverage or NoData, computation is halted with an explicit `ScientificComputationException` (`OBSERVER_TERRAIN_OUTSIDE_COVERAGE` or `OBSERVER_TERRAIN_NODATA`).
 - Total observer height relative to the reference sphere:
   $$h_{\text{total}} = H_{\text{obs}} + h_{\text{inst}}$$
-  $$r_{\text{obs}} = R + h_{\text{total}}$$
+  $$r_{\text{obs}} = R + h_{\text{total}} = R + H_{\text{obs}} + h_{\text{inst}}$$
 - The 3D Cartesian position vector of the observer in Moon-centered body-fixed coordinates (`MOON_ME_DE421`) is:
   $$\vec{r}_{\text{obs}} = \begin{pmatrix} r_{\text{obs}} \cos\phi_{\text{obs}} \cos\lambda_{\text{obs}} \\ r_{\text{obs}} \cos\phi_{\text{obs}} \sin\lambda_{\text{obs}} \\ r_{\text{obs}} \sin\phi_{\text{obs}} \end{pmatrix}$$
 
