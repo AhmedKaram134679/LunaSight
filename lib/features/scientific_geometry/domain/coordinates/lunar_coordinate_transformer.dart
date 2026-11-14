@@ -28,7 +28,19 @@ class LunarCoordinateTransformer {
 
     // Exact-pole numerical contract (§7.3):
     // Prevents non-zero floating-point machine residuals in cos(pi/2) from contaminating polar X/Y.
+    // Follows the same strict finite-vector and arithmetic-safety contract as ordinary coordinates.
     if (coords.isExactNorthPole) {
+      if (!r.isFinite) {
+        throw ScientificComputationException(
+          message: 'North Pole transformation resulted in non-finite component values.',
+          code: 'ARITHMETIC_OVERFLOW',
+          context: {
+            'effective_radius': r,
+            'latitude_deg': coords.latitude.inDegrees,
+            'longitude_deg': coords.longitude.inDegrees,
+          },
+        );
+      }
       return FramedVector3(
         vector: Vector3(0.0, 0.0, r),
         frame: coords.frame,
@@ -38,8 +50,20 @@ class LunarCoordinateTransformer {
     }
 
     if (coords.isExactSouthPole) {
+      final z = -r;
+      if (!z.isFinite) {
+        throw ScientificComputationException(
+          message: 'South Pole transformation resulted in non-finite component values.',
+          code: 'ARITHMETIC_OVERFLOW',
+          context: {
+            'effective_radius': r,
+            'latitude_deg': coords.latitude.inDegrees,
+            'longitude_deg': coords.longitude.inDegrees,
+          },
+        );
+      }
       return FramedVector3(
-        vector: Vector3(0.0, 0.0, -r),
+        vector: Vector3(0.0, 0.0, z),
         frame: coords.frame,
         origin: CoordinateOriginId.moonCenterOfMass,
         unit: VectorUnit.meters,

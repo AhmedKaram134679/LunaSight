@@ -5,45 +5,90 @@ import 'package:luna_sight/features/scientific_geometry/domain/quantities/distan
 /// Strongly typed value object representing a geometric reference surface.
 ///
 /// Phase 04C specifically utilizes an explicitly declared spherical reference surface
-/// with equatorial and polar radii equal to 1,737,400 meters ($a = b = c = R$).
+/// with equatorial and polar semi-axes equal to 1,737,400 meters ($a = b = c = R$).
 @immutable
 class ReferenceSurfaceId {
   /// Descriptive name or identifier of the reference surface model.
   final String name;
 
-  /// The equatorial radius $a$ in meters.
-  final Distance equatorialRadius;
+  /// Semi-major / equatorial semi-axis $a$ in meters.
+  final Distance semiMajorAxisA;
 
-  /// The polar radius $c$ in meters.
-  final Distance polarRadius;
+  /// Semi-intermediate / equatorial semi-axis $b$ in meters ($a = b$ for axisymmetric/spherical).
+  final Distance semiIntermediateAxisB;
 
-  const ReferenceSurfaceId({
+  /// Polar semi-axis $c$ in meters.
+  final Distance semiMinorAxisC;
+
+  /// Primary constructor supporting three-axis ($a, b, c$) models as well as two-radius models.
+  ///
+  /// If [semiMajorAxisA] is omitted, [equatorialRadius] must be provided.
+  /// If [semiIntermediateAxisB] is omitted, it defaults to the equatorial radius.
+  /// If [semiMinorAxisC] is omitted, [polarRadius] must be provided.
+  ReferenceSurfaceId({
     required this.name,
-    required this.equatorialRadius,
-    required this.polarRadius,
+    Distance? semiMajorAxisA,
+    Distance? semiIntermediateAxisB,
+    Distance? semiMinorAxisC,
+    Distance? equatorialRadius,
+    Distance? polarRadius,
+  }) : semiMajorAxisA = semiMajorAxisA ?? equatorialRadius!,
+       semiIntermediateAxisB =
+           semiIntermediateAxisB ?? semiMajorAxisA ?? equatorialRadius!,
+       semiMinorAxisC = semiMinorAxisC ?? polarRadius!;
+
+  /// Constant constructor explicitly specifying all three semi-axes ($a, b, c$).
+  const ReferenceSurfaceId.triaxial({
+    required this.name,
+    required this.semiMajorAxisA,
+    required this.semiIntermediateAxisB,
+    required this.semiMinorAxisC,
   });
 
-  /// The canonical LOLA / lunar mean spherical reference model ($R = 1,737,400\text{ m}$).
-  static final ReferenceSurfaceId lunarSphere1737400 = ReferenceSurfaceId(
-    name: 'LUNAR_SPHERE_1737400',
-    equatorialRadius: Distance.fromMeters(1737400.0),
-    polarRadius: Distance.fromMeters(1737400.0),
-  );
+  /// Backward-compatible constructor for two-radius surface specifications.
+  ReferenceSurfaceId.twoRadius({
+    required String name,
+    required Distance equatorialRadius,
+    required Distance polarRadius,
+  }) : this(
+         name: name,
+         semiMajorAxisA: equatorialRadius,
+         semiIntermediateAxisB: equatorialRadius,
+         semiMinorAxisC: polarRadius,
+       );
 
-  /// Whether this reference surface is an exact sphere ($a == c$).
-  bool get isSpherical => equatorialRadius == polarRadius;
+  /// Backward-compatible getter for equatorial radius ($a$).
+  Distance get equatorialRadius => semiMajorAxisA;
 
-  /// Validates that this surface matches the required spherical reference surface for Phase 04C.
+  /// Backward-compatible getter for polar radius ($c$).
+  Distance get polarRadius => semiMinorAxisC;
+
+  /// The canonical LOLA / lunar mean spherical reference model ($a = b = c = 1,737,400\text{ m}$).
+  static final ReferenceSurfaceId lunarSphere1737400 =
+      ReferenceSurfaceId.triaxial(
+        name: 'LUNAR_SPHERE_1737400',
+        semiMajorAxisA: Distance.fromMeters(1737400.0),
+        semiIntermediateAxisB: Distance.fromMeters(1737400.0),
+        semiMinorAxisC: Distance.fromMeters(1737400.0),
+      );
+
+  /// Whether this reference surface is an exact sphere ($a == b == c$).
+  bool get isSpherical =>
+      semiMajorAxisA == semiIntermediateAxisB &&
+      semiIntermediateAxisB == semiMinorAxisC;
+
+  /// Validates that this surface matches the approved spherical reference surface for Phase 04C.
   void validateSphericalBaseline() {
-    if (!isSpherical || equatorialRadius.meters != 1737400.0) {
+    if (this != lunarSphere1737400) {
       throw ScientificComputationException(
         message:
-            'Unsupported reference surface. Phase 04C requires a spherical surface of radius 1,737,400 m. Got: $name',
+            'Unsupported reference surface. Phase 04C requires the approved spherical baseline LUNAR_SPHERE_1737400 ($name).',
         code: 'INCOMPATIBLE_HEIGHT_REFERENCE',
         context: {
           'surface_name': name,
-          'equatorial_radius': equatorialRadius.meters,
-          'polar_radius': polarRadius.meters,
+          'semi_major_axis_a': semiMajorAxisA.meters,
+          'semi_intermediate_axis_b': semiIntermediateAxisB.meters,
+          'semi_minor_axis_c': semiMinorAxisC.meters,
         },
       );
     }
@@ -54,15 +99,17 @@ class ReferenceSurfaceId {
       identical(this, other) ||
       (other is ReferenceSurfaceId &&
           name == other.name &&
-          equatorialRadius == other.equatorialRadius &&
-          polarRadius == other.polarRadius);
+          semiMajorAxisA == other.semiMajorAxisA &&
+          semiIntermediateAxisB == other.semiIntermediateAxisB &&
+          semiMinorAxisC == other.semiMinorAxisC);
 
   @override
-  int get hashCode => Object.hash(name, equatorialRadius, polarRadius);
+  int get hashCode =>
+      Object.hash(name, semiMajorAxisA, semiIntermediateAxisB, semiMinorAxisC);
 
   @override
   String toString() =>
-      'ReferenceSurfaceId($name, R=${equatorialRadius.meters}m)';
+      'ReferenceSurfaceId($name, a=${semiMajorAxisA.meters}m, b=${semiIntermediateAxisB.meters}m, c=${semiMinorAxisC.meters}m)';
 }
 
 /// Strongly typed value object defining the height reference datum.
@@ -84,6 +131,22 @@ class HeightReferenceId {
     name: 'SPHERE_RELATIVE_1737400',
     referenceSurface: ReferenceSurfaceId.lunarSphere1737400,
   );
+
+  /// Validates that this height reference matches the approved canonical datum for Phase 04C.
+  void validateApprovedBaseline() {
+    if (this != sphereRelative) {
+      throw ScientificComputationException(
+        message:
+            'Unsupported height reference. Phase 04C requires the approved baseline SPHERE_RELATIVE_1737400 ($name).',
+        code: 'INCOMPATIBLE_HEIGHT_REFERENCE',
+        context: {
+          'height_reference_name': name,
+          'surface_name': referenceSurface.name,
+        },
+      );
+    }
+    referenceSurface.validateSphericalBaseline();
+  }
 
   @override
   bool operator ==(Object other) =>

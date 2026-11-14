@@ -101,20 +101,28 @@ class LunarGeographicCoordinates {
       );
     }
 
-    // 4. Validate height reference compatibility with Phase 04C spherical baseline
-    heightReference.referenceSurface.validateSphericalBaseline();
+    // 4. Validate effective radius finite arithmetic before reference validation: r = R + h
+    final r0 = heightReference.referenceSurface.equatorialRadius.meters;
+    final effectiveRadius = r0 + heightMeters;
+    if (!effectiveRadius.isFinite) {
+      throw ScientificComputationException(
+        message: 'Effective radius calculation (R + h) overflowed to non-finite value.',
+        code: 'ARITHMETIC_OVERFLOW',
+        context: {'reference_radius_meters': r0, 'height_meters': heightMeters},
+      );
+    }
 
-    // 5. Validate effective radius positivity: r = R + h > 0
-    final effectiveRadius =
-        heightReference.referenceSurface.equatorialRadius.meters + heightMeters;
+    // 5. Validate height reference identity against Phase 04C approved baseline
+    heightReference.validateApprovedBaseline();
+
+    // 6. Validate effective radius strictly positive value: r = R + h > 0
     if (effectiveRadius <= 0.0) {
       throw ScientificComputationException(
         message:
             'Effective radius (R + h) must be strictly positive. Got: $effectiveRadius m',
         code: 'NON_POSITIVE_EFFECTIVE_RADIUS',
         context: {
-          'radius_meters':
-              heightReference.referenceSurface.equatorialRadius.meters,
+          'radius_meters': r0,
           'height_meters': heightMeters,
           'effective_radius': effectiveRadius,
         },

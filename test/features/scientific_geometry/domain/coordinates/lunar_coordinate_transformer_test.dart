@@ -214,6 +214,105 @@ void main() {
         );
       });
 
+      test(
+        'Rejects same-radius but incorrectly identified reference surface',
+        () {
+          final rogueSurface = ReferenceSurfaceId(
+            name: 'CUSTOM_SPHERE_1737400',
+            semiMajorAxisA: Distance.fromMeters(1737400.0),
+            semiIntermediateAxisB: Distance.fromMeters(1737400.0),
+            semiMinorAxisC: Distance.fromMeters(1737400.0),
+          );
+          final rogueRef = HeightReferenceId(
+            name: 'CUSTOM_HEIGHT_REF',
+            referenceSurface: rogueSurface,
+          );
+
+          expect(
+            () => LunarGeographicCoordinates(
+              latitude: Angle.fromDegrees(0.0),
+              latitudeType: LatitudeType.planetodetic,
+              longitude: Angle.fromDegrees(0.0),
+              longitudeDirection: LongitudeDirection.eastPositive,
+              longitudeDomain: LongitudeDomain.symmetric180,
+              heightMeters: 0.0,
+              heightReference: rogueRef,
+              frame: frame,
+            ),
+            throwsA(
+              isA<ScientificComputationException>().having(
+                (e) => e.code,
+                'code',
+                'INCOMPATIBLE_HEIGHT_REFERENCE',
+              ),
+            ),
+          );
+        },
+      );
+
+      test(
+        'Rejects unknown height-reference identity even with approved surface',
+        () {
+          final rogueRef = HeightReferenceId(
+            name: 'UNAPPROVED_DATUM',
+            referenceSurface: ReferenceSurfaceId.lunarSphere1737400,
+          );
+
+          expect(
+            () => LunarGeographicCoordinates(
+              latitude: Angle.fromDegrees(0.0),
+              latitudeType: LatitudeType.planetodetic,
+              longitude: Angle.fromDegrees(0.0),
+              longitudeDirection: LongitudeDirection.eastPositive,
+              longitudeDomain: LongitudeDomain.symmetric180,
+              heightMeters: 0.0,
+              heightReference: rogueRef,
+              frame: frame,
+            ),
+            throwsA(
+              isA<ScientificComputationException>().having(
+                (e) => e.code,
+                'code',
+                'INCOMPATIBLE_HEIGHT_REFERENCE',
+              ),
+            ),
+          );
+        },
+      );
+
+      test('Rejects effective-radius arithmetic overflow (R + h overflows to infinity)', () {
+        final hugeSurface = ReferenceSurfaceId(
+          name: 'HUGE_SURFACE',
+          semiMajorAxisA: Distance.fromMeters(1.0e308),
+          semiIntermediateAxisB: Distance.fromMeters(1.0e308),
+          semiMinorAxisC: Distance.fromMeters(1.0e308),
+        );
+        final hugeRef = HeightReferenceId(
+          name: 'HUGE_DATUM',
+          referenceSurface: hugeSurface,
+        );
+
+        expect(
+          () => LunarGeographicCoordinates(
+            latitude: Angle.fromDegrees(0.0),
+            latitudeType: LatitudeType.planetodetic,
+            longitude: Angle.fromDegrees(0.0),
+            longitudeDirection: LongitudeDirection.eastPositive,
+            longitudeDomain: LongitudeDomain.symmetric180,
+            heightMeters: 1.0e308,
+            heightReference: hugeRef,
+            frame: frame,
+          ),
+          throwsA(
+            isA<ScientificComputationException>().having(
+              (e) => e.code,
+              'code',
+              'ARITHMETIC_OVERFLOW',
+            ),
+          ),
+        );
+      });
+
       test('Rejects non-positive effective radius (R + h <= 0)', () {
         // R = 1,737,400 m, so h = -1,737,400 results in r = 0 m
         expect(
@@ -538,6 +637,103 @@ void main() {
         expect(p.vector.x, isNot(equals(0.0)));
         expect(p.vector.x, isPositive);
         expect(p.vector.z < r0, isTrue);
+      });
+
+      test('Exact poles strictly reject invalid longitude inputs', () {
+        // Longitude outside symmetric180 domain at North Pole must be rejected
+        expect(
+          () => LunarGeographicCoordinates(
+            latitude: Angle.fromDegrees(90.0),
+            latitudeType: LatitudeType.planetodetic,
+            longitude: Angle.fromDegrees(185.0),
+            longitudeDirection: LongitudeDirection.eastPositive,
+            longitudeDomain: LongitudeDomain.symmetric180,
+            heightMeters: 0.0,
+            heightReference: heightRef,
+            frame: frame,
+          ),
+          throwsA(
+            isA<ScientificComputationException>().having(
+              (e) => e.code,
+              'code',
+              'COORDINATE_OUT_OF_RANGE',
+            ),
+          ),
+        );
+
+        // Longitude outside positive360 domain at South Pole must be rejected
+        expect(
+          () => LunarGeographicCoordinates(
+            latitude: Angle.fromDegrees(-90.0),
+            latitudeType: LatitudeType.planetodetic,
+            longitude: Angle.fromDegrees(-5.0),
+            longitudeDirection: LongitudeDirection.eastPositive,
+            longitudeDomain: LongitudeDomain.positive360,
+            heightMeters: 0.0,
+            heightReference: heightRef,
+            frame: frame,
+          ),
+          throwsA(
+            isA<ScientificComputationException>().having(
+              (e) => e.code,
+              'code',
+              'COORDINATE_OUT_OF_RANGE',
+            ),
+          ),
+        );
+      });
+
+      test('Exact poles enforce identical numerical safety checks on effective radius overflow', () {
+        final hugeSurface = ReferenceSurfaceId(
+          name: 'HUGE_SURFACE',
+          semiMajorAxisA: Distance.fromMeters(1.0e308),
+          semiIntermediateAxisB: Distance.fromMeters(1.0e308),
+          semiMinorAxisC: Distance.fromMeters(1.0e308),
+        );
+        final hugeRef = HeightReferenceId(
+          name: 'HUGE_DATUM',
+          referenceSurface: hugeSurface,
+        );
+
+        expect(
+          () => LunarGeographicCoordinates(
+            latitude: Angle.fromDegrees(90.0),
+            latitudeType: LatitudeType.planetodetic,
+            longitude: Angle.fromDegrees(0.0),
+            longitudeDirection: LongitudeDirection.eastPositive,
+            longitudeDomain: LongitudeDomain.symmetric180,
+            heightMeters: 1.0e308,
+            heightReference: hugeRef,
+            frame: frame,
+          ),
+          throwsA(
+            isA<ScientificComputationException>().having(
+              (e) => e.code,
+              'code',
+              'ARITHMETIC_OVERFLOW',
+            ),
+          ),
+        );
+
+        expect(
+          () => LunarGeographicCoordinates(
+            latitude: Angle.fromDegrees(-90.0),
+            latitudeType: LatitudeType.planetodetic,
+            longitude: Angle.fromDegrees(0.0),
+            longitudeDirection: LongitudeDirection.eastPositive,
+            longitudeDomain: LongitudeDomain.symmetric180,
+            heightMeters: 1.0e308,
+            heightReference: hugeRef,
+            frame: frame,
+          ),
+          throwsA(
+            isA<ScientificComputationException>().having(
+              (e) => e.code,
+              'code',
+              'ARITHMETIC_OVERFLOW',
+            ),
+          ),
+        );
       });
     });
 
