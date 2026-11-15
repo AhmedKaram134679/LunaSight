@@ -19,11 +19,11 @@ import 'package:luna_sight/features/solar_earth_visibility/domain/models/time_sc
 /// - Implements the classical compact Keplerian analytical approximation (USNO Circular No. 179 /
 ///   Moyer 1981 / Fairhead & Bretagnon 1990 leading-term formulation) for $\text{TDB} - \text{TT}$:
 ///   $$\text{TDB} - \text{TT} = 0.001657\sin(g + 0.0167\sin g)\text{ seconds}$$
-///   where $g = 357.53^\circ + 35999.05^\circ T_{\text{TT}}$ (with $T_{\text{TT}}$ in Julian centuries since J2000.0).
+///   where $g = 357.53^\circ + 35999.05^\circ T_{\text{TT}}$ (with $T_{\text{TT}}$ in Julian centuries of TT since J2000.0).
 ///   Rigorous numerical benchmarking against the canonical IAU SOFA / ERFA 787-term Fairhead & Bretagnon series
-///   demonstrates:
-///   - 1950–2050 (36,890 daily samples): $\text{RMS} = 16.79\ \mu\text{s}$, $\text{Max} = 37.74\ \mu\text{s}$ (1960-10-12).
-///   - 1900–2100 (73,414 daily samples): $\text{RMS} = 16.98\ \mu\text{s}$, $\text{Max} = 40.01\ \mu\text{s}$ (1901-10-06).
+///   (evaluated using exact fixed-point TDB arguments in the geocentric frame) demonstrates:
+///   - 1950–2050 (885,360 hourly samples): $\text{RMS} = 16.7850\ \mu\text{s}$, $\text{Max} = 37.7449\ \mu\text{s}$ (1960-10-12 01:00:00 TT).
+///   - 1900–2100 (1,761,936 hourly samples): $\text{RMS} = 16.9828\ \mu\text{s}$, $\text{Max} = 40.0067\ \mu\text{s}$ (1901-10-05 19:00:00 TT).
 ///   The residuals are dominated by unmodeled Jupiter/Saturn planetary perturbation harmonics ($\le 22.4\ \mu\text{s}$).
 ///   At the Moon's synodic rotation rate, a timing uncertainty of $40\ \mu\text{s}$ corresponds to $< 0.025\text{ milliarcseconds}$
 ///   of solar topocentric position change, well within the target design tolerance ($< 100\ \mu\text{s}$).

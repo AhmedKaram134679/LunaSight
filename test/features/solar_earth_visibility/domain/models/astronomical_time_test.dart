@@ -257,6 +257,71 @@ void main() {
       ); // Relativistic variation is nonzero
     });
 
+    test('Verifies TT and TDB are distinct non-interchangeable scales with sub-millisecond relativistic shift', () {
+      // Pick an epoch near the maximum annual relativistic eccentricity perturbation (e.g. October, when g ~ 270 deg)
+      final tUtc = AstronomicalTime.fromUtcDateTime(
+        DateTime.utc(2024, 10, 12, 12, 0, 0),
+      );
+      final tTT = tUtc.toTerrestrialTime();
+      final tTDB = tUtc.toBarycentricDynamicalTime();
+
+      expect(tTT.scale, TimeScale.tt);
+      expect(tTDB.scale, TimeScale.tdb);
+
+      // Julian Dates are distinct: TDB Julian Date != TT Julian Date
+      expect(tTDB.julianDate, isNot(equals(tTT.julianDate)));
+
+      final diffSec = tTDB.differenceInSeconds(tTT);
+      // The relativistic offset is in the range [-0.0017s, +0.0017s]
+      expect(diffSec.abs(), lessThanOrEqualTo(0.0017));
+
+      // Treating TT as TDB directly without conversion causes a systematic offset of up to ~1.65 ms (~1650 us),
+      // which severely violates sub-100-microsecond astronomical accuracy requirements.
+      final directJdDiffMicroseconds =
+          (tTDB.julianDate - tTT.julianDate) * 86400.0 * 1e6;
+      expect(directJdDiffMicroseconds.abs(), greaterThan(100.0));
+    });
+
+    test('Verifies round-trip TT -> TDB -> TT fixed-point consistency to sub-nanosecond precision', () {
+      // Test at seasonal points across the Earth's orbit
+      final testDates = [
+        DateTime.utc(2000, 1, 1, 12, 0, 0),
+        DateTime.utc(2010, 4, 15, 6, 0, 0),
+        DateTime.utc(2020, 7, 5, 12, 0, 0),
+        DateTime.utc(2024, 10, 12, 18, 0, 0),
+        DateTime.utc(2026, 11, 15, 0, 0, 0),
+        DateTime.utc(2050, 12, 31, 23, 0, 0),
+      ];
+
+      for (final date in testDates) {
+        final tTT = AstronomicalTime.fromUtcDateTime(date)
+            .toTerrestrialTime(allowExtrapolation: true);
+        final tTDB = tTT.toBarycentricDynamicalTime(allowExtrapolation: true);
+        final tTTReconstructed = tTDB.toTerrestrialTime(
+          allowExtrapolation: true,
+        );
+
+        // Round-trip must recover original TT within sub-nanosecond precision (< 1e-9 seconds)
+        final errorSec = tTTReconstructed.differenceInSeconds(tTT).abs();
+        expect(
+          errorSec,
+          lessThan(1e-9),
+          reason:
+              'TT -> TDB -> TT round-trip error at $date must be < 1 ns, got $errorSec s',
+        );
+
+        // Physical instant equivalence must hold exactly
+        expect(
+          tTT.representsSameInstant(tTDB, allowExtrapolation: true),
+          isTrue,
+        );
+        expect(
+          tTT.representsSameInstant(tTTReconstructed, allowExtrapolation: true),
+          isTrue,
+        );
+      }
+    });
+
     test('Rejects non-finite Julian Dates in factory constructor', () {
       expect(
         () => AstronomicalTime.fromJulianDate(double.nan, scale: TimeScale.tt),
