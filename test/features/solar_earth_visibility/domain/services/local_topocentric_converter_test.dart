@@ -557,6 +557,53 @@ void main() {
         expect(topo.slantRange.inMeters, closeTo(10000.0, 1e-6));
         expect(topo.horizontalRange.inMeters, closeTo(10000.0, 1e-6));
         expect(topo.azimuth!.inDegrees, closeTo(0.0, 1e-6));
+
+        // 3. Tolerance parameter validation in toTopocentric()
+        expect(
+          () => converter.toTopocentric(
+            targetVector: targetTT,
+            observerVector: obsVectorUtc,
+            observerCoordinates: obsCoords,
+            epochToleranceSeconds: -1.0,
+          ),
+          throwsA(
+            isA<ScientificComputationException>().having(
+              (e) => e.code,
+              'code',
+              'INVALID_TOLERANCE',
+            ),
+          ),
+        );
+        expect(
+          () => converter.toTopocentric(
+            targetVector: targetTT,
+            observerVector: obsVectorUtc,
+            observerCoordinates: obsCoords,
+            epochToleranceSeconds: double.nan,
+          ),
+          throwsA(
+            isA<ScientificComputationException>().having(
+              (e) => e.code,
+              'code',
+              'NON_FINITE_VALUE',
+            ),
+          ),
+        );
+        expect(
+          () => converter.toTopocentric(
+            targetVector: targetTT,
+            observerVector: obsVectorUtc,
+            observerCoordinates: obsCoords,
+            epochToleranceSeconds: double.infinity,
+          ),
+          throwsA(
+            isA<ScientificComputationException>().having(
+              (e) => e.code,
+              'code',
+              'NON_FINITE_VALUE',
+            ),
+          ),
+        );
       },
     );
   });

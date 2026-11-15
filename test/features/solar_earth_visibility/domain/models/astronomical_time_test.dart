@@ -482,5 +482,104 @@ void main() {
       final rel = targetUtc.relativePositionFrom(observerTT);
       expect(rel.vector.x, closeTo(800.0, 1e-6));
     });
+
+    test('Validates epoch comparison tolerance argument in representsSameInstant()', () {
+      final t1 = AstronomicalTime.fromUtcDateTime(
+        DateTime.utc(2024, 1, 1, 12, 0, 0, 0, 0),
+      );
+      final t2 = AstronomicalTime.fromUtcDateTime(
+        DateTime.utc(2024, 1, 1, 12, 0, 0, 0, 0),
+      );
+      // 1 microsecond later
+      final t1Micros = AstronomicalTime.fromUtcDateTime(
+        DateTime.utc(2024, 1, 1, 12, 0, 0, 0, 1),
+      );
+      // 5 microseconds later
+      final t5Micros = AstronomicalTime.fromUtcDateTime(
+        DateTime.utc(2024, 1, 1, 12, 0, 0, 0, 5),
+      );
+
+      // 1. Default tolerance (1 microsecond = 1e-6 s): accepted within microsecond resolution
+      expect(t1.representsSameInstant(t2), isTrue);
+      expect(
+        t1.representsSameInstant(t1Micros, toleranceSeconds: 1.01e-6),
+        isTrue,
+      );
+      expect(t1.representsSameInstant(t5Micros), isFalse);
+
+      // 2. Positive finite tolerance: accepted
+      expect(
+        t1.representsSameInstant(t5Micros, toleranceSeconds: 10e-6),
+        isTrue,
+      );
+      expect(
+        t1.representsSameInstant(t5Micros, toleranceSeconds: 2e-6),
+        isFalse,
+      );
+
+      // 3. Zero tolerance (toleranceSeconds == 0.0): accepted
+      expect(t1.representsSameInstant(t2, toleranceSeconds: 0.0), isTrue);
+      expect(
+        t1.representsSameInstant(t1Micros, toleranceSeconds: 0.0),
+        isFalse,
+      );
+
+      // 4. Negative tolerance: rejected with INVALID_TOLERANCE
+      expect(
+        () => t1.representsSameInstant(t2, toleranceSeconds: -1e-6),
+        throwsA(
+          isA<ScientificComputationException>().having(
+            (e) => e.code,
+            'code',
+            'INVALID_TOLERANCE',
+          ),
+        ),
+      );
+
+      // 5. NaN tolerance: rejected with NON_FINITE_VALUE
+      expect(
+        () => t1.representsSameInstant(t2, toleranceSeconds: double.nan),
+        throwsA(
+          isA<ScientificComputationException>().having(
+            (e) => e.code,
+            'code',
+            'NON_FINITE_VALUE',
+          ),
+        ),
+      );
+
+      // 6. Positive infinity: rejected with NON_FINITE_VALUE
+      expect(
+        () => t1.representsSameInstant(t2, toleranceSeconds: double.infinity),
+        throwsA(
+          isA<ScientificComputationException>().having(
+            (e) => e.code,
+            'code',
+            'NON_FINITE_VALUE',
+          ),
+        ),
+      );
+
+      // 7. Negative infinity: rejected with NON_FINITE_VALUE
+      expect(
+        () => t1.representsSameInstant(
+          t2,
+          toleranceSeconds: double.negativeInfinity,
+        ),
+        throwsA(
+          isA<ScientificComputationException>().having(
+            (e) => e.code,
+            'code',
+            'NON_FINITE_VALUE',
+          ),
+        ),
+      );
+
+      // 8. Immutability verification: Neither instance was modified
+      expect(t1.scale, TimeScale.utc);
+      expect(t2.scale, TimeScale.utc);
+      expect(t1.secondOfDay, closeTo(43200.0, 1e-9));
+      expect(t2.secondOfDay, closeTo(43200.0, 1e-9));
+    });
   });
 }
