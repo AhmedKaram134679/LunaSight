@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:luna_sight/app/router/app_router.dart';
 import 'package:luna_sight/app/theme/app_colors.dart';
 import 'package:luna_sight/core/constants/app_constants.dart';
 import 'package:luna_sight/core/utils/responsive_layout.dart';
@@ -11,7 +12,10 @@ import 'package:luna_sight/features/home/presentation/widgets/home_header.dart';
 import 'package:luna_sight/features/home/presentation/widgets/module_status_card.dart';
 import 'package:luna_sight/features/lunar_sites/data/datasources/bundled_lunar_site_catalog.dart';
 import 'package:luna_sight/features/lunar_sites/domain/entities/lunar_site.dart';
+import 'package:luna_sight/features/lunar_sites/domain/repositories/lunar_site_repository.dart';
+import 'package:luna_sight/features/lunar_sites/domain/services/lunar_map_coordinates_helper.dart';
 import 'package:luna_sight/features/lunar_sites/presentation/pages/lunar_site_details_page.dart';
+import 'package:luna_sight/features/solar_earth_visibility/domain/services/celestial_visibility_service.dart';
 
 /// LunaSight Mission Dashboard.
 ///
@@ -19,10 +23,12 @@ import 'package:luna_sight/features/lunar_sites/presentation/pages/lunar_site_de
 /// geodetic analysis, candidate comparison, and scientific readiness tracking.
 class HomePage extends StatefulWidget {
   final SystemModuleRepository repository;
+  final LunarSiteRepository? lunarSiteRepository;
 
   const HomePage({
     super.key,
     this.repository = const LocalSystemModuleRepository(),
+    this.lunarSiteRepository,
   });
 
   @override
@@ -33,11 +39,38 @@ class _HomePageState extends State<HomePage> {
   late final List<SystemModule> _modules;
   bool _showRoadmap = false;
   String _heroSelectedCode = 'Site04';
+  List<LunarSite> _allSites = [];
+  LunarSite? _selectedHeroSite;
 
   @override
   void initState() {
     super.initState();
     _modules = widget.repository.getSystemModules();
+    _loadSites();
+  }
+
+  Future<void> _loadSites() async {
+    final repo = widget.lunarSiteRepository ?? AppRouter.sharedRepository;
+    try {
+      final sites = await repo.getAllSites();
+      if (!mounted) return;
+      setState(() {
+        _allSites = sites;
+        if (_selectedHeroSite == null && sites.isNotEmpty) {
+          _selectedHeroSite = sites.firstWhere(
+            (s) => s.siteCode == 'Site04',
+            orElse: () => sites.first,
+          );
+          _heroSelectedCode = _selectedHeroSite!.siteCode;
+        } else if (_selectedHeroSite != null) {
+          // Re-sync selected site instance from refreshed list
+          _selectedHeroSite = sites.firstWhere(
+            (s) => s.id == _selectedHeroSite!.id,
+            orElse: () => _selectedHeroSite!,
+          );
+        }
+      });
+    } catch (_) {}
   }
 
   @override
@@ -111,7 +144,10 @@ class _HomePageState extends State<HomePage> {
                     subtitle: 'Search and filter 27 official NASA GSFC PGDA Product 78 south-pole candidate regions with interactive polar radar map.',
                     badge: '27 SITES',
                     badgeColor: AppColors.statusInfo,
-                    onTap: () => Navigator.of(context).pushNamed('/sites'),
+                    onTap: () =>
+                        Navigator.of(context)
+                            .pushNamed('/sites')
+                            .then((_) => _loadSites()),
                   ),
                   const SizedBox(height: AppConstants.space12),
                   _buildActionCard(
@@ -121,7 +157,10 @@ class _HomePageState extends State<HomePage> {
                     subtitle: 'Simulate topocentric solar elevation, grazing twilight, and direct-to-Earth communication link margin.',
                     badge: 'CELESTIAL',
                     badgeColor: const Color(0xFFF59E0B),
-                    onTap: () => Navigator.of(context).pushNamed('/visibility'),
+                    onTap: () =>
+                        Navigator.of(context)
+                            .pushNamed('/visibility')
+                            .then((_) => _loadSites()),
                   ),
                   const SizedBox(height: AppConstants.space12),
                   _buildActionCard(
@@ -131,7 +170,10 @@ class _HomePageState extends State<HomePage> {
                     subtitle: 'Explore 14-day lunar day/night cycles, surface EVA daylight windows, and operational power budgets.',
                     badge: 'TIMELINE',
                     badgeColor: AppColors.darkPrimary,
-                    onTap: () => Navigator.of(context).pushNamed('/planner'),
+                    onTap: () =>
+                        Navigator.of(context)
+                            .pushNamed('/planner')
+                            .then((_) => _loadSites()),
                   ),
                   const SizedBox(height: AppConstants.space12),
                   _buildActionCard(
@@ -142,7 +184,9 @@ class _HomePageState extends State<HomePage> {
                     badge: 'MATRIX',
                     badgeColor: AppColors.statusSuccess,
                     onTap: () =>
-                        Navigator.of(context).pushNamed('/sites/compare'),
+                        Navigator.of(context)
+                            .pushNamed('/sites/compare')
+                            .then((_) => _loadSites()),
                   ),
                   const SizedBox(height: AppConstants.space12),
                   _buildActionCard(
@@ -153,7 +197,9 @@ class _HomePageState extends State<HomePage> {
                     badge: 'CUSTOM',
                     badgeColor: AppColors.darkSecondary,
                     onTap: () =>
-                        Navigator.of(context).pushNamed('/sites/custom'),
+                        Navigator.of(context)
+                            .pushNamed('/sites/custom')
+                            .then((_) => _loadSites()),
                   ),
                 ] else ...[
                   Row(
@@ -168,7 +214,9 @@ class _HomePageState extends State<HomePage> {
                           badge: '27 SITES',
                           badgeColor: AppColors.statusInfo,
                           onTap: () =>
-                              Navigator.of(context).pushNamed('/sites'),
+                              Navigator.of(context)
+                                  .pushNamed('/sites')
+                                  .then((_) => _loadSites()),
                         ),
                       ),
                       const SizedBox(width: AppConstants.space16),
@@ -181,7 +229,9 @@ class _HomePageState extends State<HomePage> {
                           badge: 'CELESTIAL',
                           badgeColor: const Color(0xFFF59E0B),
                           onTap: () =>
-                              Navigator.of(context).pushNamed('/visibility'),
+                              Navigator.of(context)
+                                  .pushNamed('/visibility')
+                                  .then((_) => _loadSites()),
                         ),
                       ),
                     ],
@@ -199,7 +249,9 @@ class _HomePageState extends State<HomePage> {
                           badge: 'TIMELINE',
                           badgeColor: AppColors.darkPrimary,
                           onTap: () =>
-                              Navigator.of(context).pushNamed('/planner'),
+                              Navigator.of(context)
+                                  .pushNamed('/planner')
+                                  .then((_) => _loadSites()),
                         ),
                       ),
                       const SizedBox(width: AppConstants.space16),
@@ -212,7 +264,9 @@ class _HomePageState extends State<HomePage> {
                           badge: 'MATRIX',
                           badgeColor: AppColors.statusSuccess,
                           onTap: () =>
-                              Navigator.of(context).pushNamed('/sites/compare'),
+                              Navigator.of(context)
+                                  .pushNamed('/sites/compare')
+                                  .then((_) => _loadSites()),
                         ),
                       ),
                       const SizedBox(width: AppConstants.space16),
@@ -225,7 +279,9 @@ class _HomePageState extends State<HomePage> {
                           badge: 'CUSTOM',
                           badgeColor: AppColors.darkSecondary,
                           onTap: () =>
-                              Navigator.of(context).pushNamed('/sites/custom'),
+                              Navigator.of(context)
+                                  .pushNamed('/sites/custom')
+                                  .then((_) => _loadSites()),
                         ),
                       ),
                     ],
@@ -387,13 +443,41 @@ class _HomePageState extends State<HomePage> {
             scrollDirection: Axis.horizontal,
             child: Row(
               children: [
-                _buildHeroSiteChip('Site04', 'Shackleton Rim (Site 04)'),
+                _buildHeroSiteChipByCode('Site04', 'Shackleton Rim (Site 04)'),
                 const SizedBox(width: AppConstants.space8),
-                _buildHeroSiteChip('Site01', 'Connecting Ridge (Site 01)'),
+                _buildHeroSiteChipByCode(
+                  'Site01',
+                  'Connecting Ridge (Site 01)',
+                ),
                 const SizedBox(width: AppConstants.space8),
-                _buildHeroSiteChip('Site07', 'Haworth Crater (Site 07)'),
+                _buildHeroSiteChipByCode('Site07', 'Haworth Crater (Site 07)'),
                 const SizedBox(width: AppConstants.space8),
-                _buildHeroSiteChip('Site11', 'Amundsen Rim (Site 11)'),
+                _buildHeroSiteChipByCode('Site11', 'Amundsen Rim (Site 11)'),
+                // Render any registered custom landing sites
+                for (final customSite in _allSites.where(
+                  (s) => s.classification == SiteClassification.userDefined,
+                )) ...[
+                  const SizedBox(width: AppConstants.space8),
+                  ChoiceChip(
+                    label: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.person_pin_circle_outlined,
+                          size: 14,
+                          color: AppColors.statusSuccess,
+                        ),
+                        const SizedBox(width: 4),
+                        Text('${customSite.name} (Custom)'),
+                      ],
+                    ),
+                    selected: _heroSelectedCode == customSite.siteCode,
+                    onSelected: (_) => setState(() {
+                      _heroSelectedCode = customSite.siteCode;
+                      _selectedHeroSite = customSite;
+                    }),
+                  ),
+                ],
               ],
             ),
           ),
@@ -474,11 +558,15 @@ class _HomePageState extends State<HomePage> {
             width: double.infinity,
             child: FilledButton.tonalIcon(
               onPressed: () {
-                final site = BundledLunarSiteCatalog.officialSites.firstWhere(
-                  (s) => s.siteCode == _heroSelectedCode,
-                  orElse: () => BundledLunarSiteCatalog.officialSites.first,
-                );
-                Navigator.of(context).pushNamed('/visibility', arguments: site);
+                final site =
+                    _selectedHeroSite ??
+                    _allSites.firstWhere(
+                      (s) => s.siteCode == _heroSelectedCode,
+                      orElse: () => BundledLunarSiteCatalog.officialSites.first,
+                    );
+                Navigator.of(context)
+                    .pushNamed('/visibility', arguments: site)
+                    .then((_) => _loadSites());
               },
               icon: const Icon(Icons.wb_sunny_outlined, size: 16),
               label: const Text('Analyze Visibility & Lighting'),
@@ -489,33 +577,66 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildHeroSiteChip(String code, String label) {
+  Widget _buildHeroSiteChipByCode(String code, String label) {
     final isSelected = _heroSelectedCode == code;
     return ChoiceChip(
       label: Text(label),
       selected: isSelected,
-      onSelected: (_) => setState(() => _heroSelectedCode = code),
+      onSelected: (_) => setState(() {
+        _heroSelectedCode = code;
+        _selectedHeroSite = _allSites.firstWhere(
+          (s) => s.siteCode == code,
+          orElse: () => BundledLunarSiteCatalog.officialSites.firstWhere(
+            (s) => s.siteCode == code,
+          ),
+        );
+      }),
     );
   }
 
   String _getHeroSiteSolarTelemetry(String code) {
-    return switch (code) {
-      'Site04' => 'Sun Elevation: +1.42° • Direct Sunlight (88.5% flux)',
-      'Site01' => 'Sun Elevation: +1.15° • Direct Sunlight (84.1% flux)',
-      'Site07' => 'Sun Elevation: -0.38° • Grazing Shadow / Penumbra',
-      'Site11' => 'Sun Elevation: +1.86° • Direct Sunlight (91.0% flux)',
-      _ => 'Sun Elevation: +1.20° • Direct Sunlight',
-    };
+    final site = _allSites.firstWhere(
+      (s) => s.siteCode == code,
+      orElse: () => BundledLunarSiteCatalog.officialSites.firstWhere(
+        (s) => s.siteCode == code,
+        orElse: () => BundledLunarSiteCatalog.officialSites.first,
+      ),
+    );
+    final helper = const LunarMapCoordinatesHelper();
+    final pt = helper.getMapPoint(site);
+    if (pt == null) return 'Sun Elevation: +1.20° • Direct Sunlight';
+
+    final state = const CelestialVisibilityService().computeVisibility(
+      latitudeDeg: pt.latitude,
+      longitudeDeg: pt.longitude,
+      epochHours: 72.0,
+    );
+    final sign = state.sunElevationDegrees >= 0 ? '+' : '';
+    return 'Sun Elevation: $sign${state.sunElevationDegrees.toStringAsFixed(2)}° • Direct Sunlight (${state.solarFluxWattsPerM2.toStringAsFixed(1)} W/m² flux)';
   }
 
   String _getHeroSiteEarthTelemetry(String code) {
-    return switch (code) {
-      'Site04' => 'Earth Elevation: +5.18° • Clear LOS (+16.1 dB margin)',
-      'Site01' => 'Earth Elevation: +4.62° • Clear LOS (+15.4 dB margin)',
-      'Site07' => 'Earth Elevation: +2.10° • Marginal Grazing LOS (+10.5 dB)',
-      'Site11' => 'Earth Elevation: +6.38° • Clear LOS (+17.2 dB margin)',
-      _ => 'Earth Elevation: +4.50° • Clear Line of Sight',
-    };
+    final site = _allSites.firstWhere(
+      (s) => s.siteCode == code,
+      orElse: () => BundledLunarSiteCatalog.officialSites.firstWhere(
+        (s) => s.siteCode == code,
+        orElse: () => BundledLunarSiteCatalog.officialSites.first,
+      ),
+    );
+    final helper = const LunarMapCoordinatesHelper();
+    final pt = helper.getMapPoint(site);
+    if (pt == null) return 'Earth Elevation: +4.50° • Clear Line of Sight';
+
+    final state = const CelestialVisibilityService().computeVisibility(
+      latitudeDeg: pt.latitude,
+      longitudeDeg: pt.longitude,
+      epochHours: 72.0,
+    );
+    final sign = state.earthElevationDegrees >= 0 ? '+' : '';
+    final margin = state.commLinkMarginDb > 0
+        ? '+${state.commLinkMarginDb.toStringAsFixed(1)} dB'
+        : 'Marginal';
+    return 'Earth Elevation: $sign${state.earthElevationDegrees.toStringAsFixed(2)}° • Clear LOS ($margin)';
   }
 
   Widget _buildTelemetryChip(

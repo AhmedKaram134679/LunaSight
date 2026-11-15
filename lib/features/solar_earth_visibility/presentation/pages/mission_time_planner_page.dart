@@ -227,13 +227,16 @@ class _MissionTimePlannerPageState extends State<MissionTimePlannerPage> {
                 size: 24,
               ),
               const SizedBox(width: AppConstants.space8),
-              Text(
-                'Artemis Lunar Mission Parameters',
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
+              Expanded(
+                child: Text(
+                  'Artemis Lunar Mission Parameters',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
-              const Spacer(),
+              const SizedBox(width: AppConstants.space8),
               const StatusBadge(
                 label: 'WINDOW PLANNING',
                 color: AppColors.darkPrimary,
@@ -336,12 +339,16 @@ class _MissionTimePlannerPageState extends State<MissionTimePlannerPage> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                'Solar Illumination & Earth Comm Timeline',
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
+              Expanded(
+                child: Text(
+                  'Solar Illumination & Earth Comm Timeline',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
+              const SizedBox(width: AppConstants.space8),
               Text(
                 'T+${_currentTimeOffsetHours.toStringAsFixed(1)}h (${(_currentTimeOffsetHours / 24.0).toStringAsFixed(1)}d)',
                 style: theme.textTheme.titleSmall?.copyWith(
@@ -526,10 +533,14 @@ class _MissionTimePlannerPageState extends State<MissionTimePlannerPage> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                'Instantaneous Conditions at $instantStr',
-                style: const TextStyle(fontWeight: FontWeight.bold),
+              Expanded(
+                child: Text(
+                  'Instantaneous Conditions at $instantStr',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
+              const SizedBox(width: AppConstants.space8),
               StatusBadge(
                 label:
                     state.illuminationState ==

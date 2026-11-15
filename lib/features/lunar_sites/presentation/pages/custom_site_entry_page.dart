@@ -7,8 +7,17 @@ import 'package:luna_sight/features/lunar_sites/domain/repositories/lunar_site_r
 /// Form page enabling the user to enter custom selenographic coordinates.
 class CustomSiteEntryPage extends StatefulWidget {
   final LunarSiteRepository repository;
+  final LunarCoordinates? initialCoordinates;
+  final String? initialName;
+  final String? initialDescription;
 
-  const CustomSiteEntryPage({super.key, required this.repository});
+  const CustomSiteEntryPage({
+    super.key,
+    required this.repository,
+    this.initialCoordinates,
+    this.initialName,
+    this.initialDescription,
+  });
 
   @override
   State<CustomSiteEntryPage> createState() => _CustomSiteEntryPageState();
@@ -17,15 +26,57 @@ class CustomSiteEntryPage extends StatefulWidget {
 class _CustomSiteEntryPageState extends State<CustomSiteEntryPage> {
   final _formKey = GlobalKey<FormState>();
 
-  final _nameController = TextEditingController();
-  final _latitudeController = TextEditingController();
-  final _longitudeController = TextEditingController();
-  final _altitudeController = TextEditingController();
-  final _descriptionController = TextEditingController();
+  late final TextEditingController _nameController;
+  late final TextEditingController _latitudeController;
+  late final TextEditingController _longitudeController;
+  late final TextEditingController _altitudeController;
+  late final TextEditingController _descriptionController;
 
   LongitudeConvention _convention = LongitudeConvention.eastPositive;
   bool _isSaving = false;
   String? _errorMessage;
+  List<String> _existingNames = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _nameController = TextEditingController(text: widget.initialName ?? '');
+    _latitudeController = TextEditingController(
+      text: widget.initialCoordinates != null
+          ? widget.initialCoordinates!.latitude.toStringAsFixed(4)
+          : '',
+    );
+    _longitudeController = TextEditingController(
+      text: widget.initialCoordinates != null
+          ? widget.initialCoordinates!.longitude.toStringAsFixed(4)
+          : '',
+    );
+    _altitudeController = TextEditingController(
+      text: widget.initialCoordinates?.altitudeMeters != null
+          ? widget.initialCoordinates!.altitudeMeters!.toStringAsFixed(1)
+          : '',
+    );
+    _descriptionController = TextEditingController(
+      text: widget.initialDescription ?? '',
+    );
+
+    if (widget.initialCoordinates != null) {
+      _convention = widget.initialCoordinates!.longitudeConvention;
+    }
+
+    _loadExistingNames();
+  }
+
+  Future<void> _loadExistingNames() async {
+    try {
+      final all = await widget.repository.getAllSites();
+      if (mounted) {
+        setState(() {
+          _existingNames = all.map((s) => s.name.trim().toLowerCase()).toList();
+        });
+      }
+    } catch (_) {}
+  }
 
   @override
   void dispose() {
@@ -140,6 +191,10 @@ class _CustomSiteEntryPageState extends State<CustomSiteEntryPage> {
                       validator: (value) {
                         if (value == null || value.trim().isEmpty) {
                           return 'Site name is required';
+                        }
+                        final trimmed = value.trim().toLowerCase();
+                        if (_existingNames.contains(trimmed)) {
+                          return 'A landing site named "${value.trim()}" already exists';
                         }
                         return null;
                       },

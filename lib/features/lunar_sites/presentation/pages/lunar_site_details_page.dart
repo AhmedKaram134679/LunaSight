@@ -194,12 +194,16 @@ class _LunarSiteDetailsPageState extends State<LunarSiteDetailsPage> {
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Text(
-                              'Body-Fixed Cartesian Position (Phase 04)',
-                              style: theme.textTheme.titleSmall?.copyWith(
-                                color: theme.colorScheme.primary,
+                            Expanded(
+                              child: Text(
+                                'Body-Fixed Cartesian Position (Phase 04)',
+                                style: theme.textTheme.titleSmall?.copyWith(
+                                  color: theme.colorScheme.primary,
+                                ),
+                                overflow: TextOverflow.ellipsis,
                               ),
                             ),
+                            const SizedBox(width: AppConstants.space8),
                             const StatusBadge(
                               label: 'COMPUTED (MOON_ME_DE421)',
                               color: AppColors.statusSuccess,
@@ -257,12 +261,16 @@ class _LunarSiteDetailsPageState extends State<LunarSiteDetailsPage> {
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Text(
-                              'Local Horizon Frame SEZ Triad (Phase 06)',
-                              style: theme.textTheme.titleSmall?.copyWith(
-                                color: theme.colorScheme.primary,
+                            Expanded(
+                              child: Text(
+                                'Local Horizon Frame SEZ Triad (Phase 06)',
+                                style: theme.textTheme.titleSmall?.copyWith(
+                                  color: theme.colorScheme.primary,
+                                ),
+                                overflow: TextOverflow.ellipsis,
                               ),
                             ),
+                            const SizedBox(width: AppConstants.space8),
                             const StatusBadge(
                               label: 'COMPUTED (ORTHONORMAL)',
                               color: AppColors.statusSuccess,

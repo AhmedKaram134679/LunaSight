@@ -452,22 +452,28 @@ class _VisibilityAnalysisPageState extends State<VisibilityAnalysisPage> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Row(
-                children: [
-                  Icon(
-                    Icons.schedule_rounded,
-                    color: theme.colorScheme.primary,
-                    size: 20,
-                  ),
-                  const SizedBox(width: AppConstants.space8),
-                  Text(
-                    'Lunar Synodic Timeline Scrubber',
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.bold,
+              Expanded(
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.schedule_rounded,
+                      color: theme.colorScheme.primary,
+                      size: 20,
                     ),
-                  ),
-                ],
+                    const SizedBox(width: AppConstants.space8),
+                    Expanded(
+                      child: Text(
+                        'Lunar Synodic Timeline Scrubber',
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
               ),
+              const SizedBox(width: AppConstants.space8),
               Text(
                 'Day $elapsedDays of 29.5 ($synodicPct%)',
                 style: theme.textTheme.labelMedium?.copyWith(
@@ -766,13 +772,16 @@ class _VisibilityAnalysisPageState extends State<VisibilityAnalysisPage> {
                 size: 20,
               ),
               const SizedBox(width: AppConstants.space8),
-              Text(
-                'Scientific Domain Engine Integration',
-                style: theme.textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.bold,
+              Expanded(
+                child: Text(
+                  'Scientific Domain Engine Integration',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
-              const Spacer(),
+              const SizedBox(width: AppConstants.space8),
               const StatusBadge(
                 label: 'PHASE 06 M03 ACTIVE',
                 color: AppColors.statusSuccess,

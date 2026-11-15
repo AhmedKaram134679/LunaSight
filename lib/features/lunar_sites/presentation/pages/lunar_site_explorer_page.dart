@@ -365,10 +365,14 @@ class _LunarSiteExplorerPageState extends State<LunarSiteExplorerPage> {
                           ? _filteredSites
                           : _allSites,
                       selectedSite: _mapSelectedSite,
+                      repository: widget.repository,
                       onSiteSelected: (site) {
                         setState(() {
                           _mapSelectedSite = site;
                         });
+                      },
+                      onSiteSaved: (newSite) {
+                        _loadSites();
                       },
                       onOpenDetails: _navigateToDetails,
                       onOpenVisibility: (site) {
