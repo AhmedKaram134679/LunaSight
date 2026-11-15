@@ -17,6 +17,7 @@ class AppRouter {
   static const String sitesRoute = '/sites';
   static const String siteDetailsRoute = '/sites/details';
   static const String customSiteRoute = '/sites/custom';
+  static const String compareSitesRoute = '/sites/compare';
 
   /// Generates routes dynamically based on incoming [RouteSettings].
   static Route<dynamic> onGenerateRoute(RouteSettings settings) {
@@ -40,6 +41,13 @@ class AppRouter {
         return MaterialPageRoute<void>(
           builder: (_) =>
               CustomSiteEntryPage(repository: LocalLunarSiteRepository()),
+          settings: settings,
+        );
+
+      case compareSitesRoute:
+        return MaterialPageRoute<void>(
+          builder: (_) =>
+              SiteComparisonPage(repository: LocalLunarSiteRepository()),
           settings: settings,
         );
 

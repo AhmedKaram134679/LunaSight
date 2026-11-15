@@ -6,6 +6,7 @@ import 'package:luna_sight/features/lunar_sites/domain/entities/lunar_site.dart'
 import 'package:luna_sight/features/lunar_sites/domain/repositories/lunar_site_repository.dart';
 import 'package:luna_sight/features/lunar_sites/presentation/pages/custom_site_entry_page.dart';
 import 'package:luna_sight/features/lunar_sites/presentation/pages/lunar_site_details_page.dart';
+import 'package:luna_sight/features/lunar_sites/presentation/pages/site_comparison_page.dart';
 import 'package:luna_sight/features/lunar_sites/presentation/widgets/lunar_site_card.dart';
 import 'package:luna_sight/features/nasa_data/nasa_data.dart';
 
@@ -141,6 +142,18 @@ class _LunarSiteExplorerPageState extends State<LunarSiteExplorerPage> {
       appBar: AppBar(
         title: const Text('Lunar Site Explorer'),
         actions: [
+          IconButton(
+            tooltip: 'Compare Candidate Sites',
+            icon: const Icon(Icons.compare_arrows_rounded),
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) =>
+                      SiteComparisonPage(repository: widget.repository),
+                ),
+              );
+            },
+          ),
           IconButton(
             tooltip: 'Add Custom Site',
             icon: const Icon(Icons.add_location_alt_outlined),

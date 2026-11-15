@@ -5,19 +5,25 @@ import 'package:luna_sight/core/utils/responsive_layout.dart';
 import 'package:luna_sight/core/widgets/scientific_card.dart';
 import 'package:luna_sight/core/widgets/status_badge.dart';
 import 'package:luna_sight/features/lunar_sites/domain/entities/lunar_site.dart';
+import 'package:luna_sight/features/lunar_sites/domain/services/site_scientific_analysis_service.dart';
 import 'package:luna_sight/features/lunar_sites/presentation/widgets/coordinate_display_widget.dart';
 import 'package:luna_sight/features/nasa_data/nasa_data.dart';
 
-/// Site Details page displaying full provenance, coordinate data, source citations,
-/// and linked NASA dataset availability from [NasaDataRepository].
+/// Site Details and Scientific Analysis page.
+///
+/// Presents selenographic coordinates, body-fixed Cartesian transformations (Phase 04),
+/// local topocentric horizon basis SEZ triad (Phase 06 M03), provenance citations,
+/// and honest status indicators for terrain horizon and ephemeris workflows.
 class LunarSiteDetailsPage extends StatefulWidget {
   final LunarSite site;
   final NasaDataRepository? nasaDataRepository;
+  final SiteScientificAnalysisService analysisService;
 
   const LunarSiteDetailsPage({
     super.key,
     required this.site,
     this.nasaDataRepository,
+    this.analysisService = const SiteScientificAnalysisService(),
   });
 
   @override
@@ -65,6 +71,7 @@ class _LunarSiteDetailsPageState extends State<LunarSiteDetailsPage> {
     final theme = Theme.of(context);
     final isCompact = ResponsiveLayout.isCompact(context);
     final site = widget.site;
+    final analysis = widget.analysisService.analyzeSite(site);
 
     final (badgeLabel, badgeColor, badgeIcon) = switch (site.classification) {
       SiteClassification.highPriorityLandingSiteRegion => (
@@ -78,7 +85,7 @@ class _LunarSiteDetailsPageState extends State<LunarSiteDetailsPage> {
         Icons.terrain_outlined,
       ),
       SiteClassification.userDefined => (
-        'USER DEFINED',
+        'USER DEFINED CANDIDATE',
         AppColors.statusSuccess,
         Icons.person_pin_circle_outlined,
       ),
@@ -98,7 +105,7 @@ class _LunarSiteDetailsPageState extends State<LunarSiteDetailsPage> {
                 vertical: AppConstants.space16,
               ),
               children: [
-                // Site Header Card
+                // 1. Site Header Card
                 ScientificCard(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -174,11 +181,210 @@ class _LunarSiteDetailsPageState extends State<LunarSiteDetailsPage> {
                 ),
                 const SizedBox(height: AppConstants.space16),
 
-                // Selenographic Coordinates Card
+                // 2. Selenographic Coordinates Card
                 CoordinateDisplayWidget(coordinates: site.coordinates),
                 const SizedBox(height: AppConstants.space16),
 
-                // Official Scientific Provenance & Citation Card
+                // 3. Body-Fixed Cartesian Position Vector (Phase 04 Verified Engine)
+                if (analysis != null) ...[
+                  ScientificCard(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              'Body-Fixed Cartesian Position (Phase 04)',
+                              style: theme.textTheme.titleSmall?.copyWith(
+                                color: theme.colorScheme.primary,
+                              ),
+                            ),
+                            const StatusBadge(
+                              label: 'COMPUTED (MOON_ME_DE421)',
+                              color: AppColors.statusSuccess,
+                              icon: Icons.check_circle_outline,
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: AppConstants.space8),
+                        Text(
+                          'Evaluated via LunarCoordinateTransformer from selenographic coordinates:',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                        const SizedBox(height: AppConstants.space12),
+                        _buildInfoRow(
+                          context,
+                          'Cartesian X',
+                          analysis.formattedXKm,
+                        ),
+                        const SizedBox(height: AppConstants.space4),
+                        _buildInfoRow(
+                          context,
+                          'Cartesian Y',
+                          analysis.formattedYKm,
+                        ),
+                        const SizedBox(height: AppConstants.space4),
+                        _buildInfoRow(
+                          context,
+                          'Cartesian Z',
+                          analysis.formattedZKm,
+                        ),
+                        const SizedBox(height: AppConstants.space4),
+                        _buildInfoRow(
+                          context,
+                          'Effective Radius (R+h)',
+                          analysis.formattedEffectiveRadiusKm,
+                        ),
+                        const SizedBox(height: AppConstants.space4),
+                        _buildInfoRow(
+                          context,
+                          'Distance to South Pole',
+                          analysis.formattedDistanceToSouthPoleKm,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: AppConstants.space16),
+
+                  // 4. Local Topocentric Horizon Basis (Phase 06 M03 Verified Engine)
+                  ScientificCard(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              'Local Horizon Frame SEZ Triad (Phase 06)',
+                              style: theme.textTheme.titleSmall?.copyWith(
+                                color: theme.colorScheme.primary,
+                              ),
+                            ),
+                            const StatusBadge(
+                              label: 'COMPUTED (ORTHONORMAL)',
+                              color: AppColors.statusSuccess,
+                              icon: Icons.check_circle_outline,
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: AppConstants.space8),
+                        Text(
+                          'Evaluated via LocalHorizonBasis in right-handed orthonormal SEZ frame:',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                        const SizedBox(height: AppConstants.space12),
+                        _buildVectorRow(
+                          context,
+                          'Zenith (Up / Normal)',
+                          analysis.horizonBasis.zenith,
+                        ),
+                        const SizedBox(height: AppConstants.space4),
+                        _buildVectorRow(
+                          context,
+                          'North (Meridian Tangent)',
+                          analysis.horizonBasis.north,
+                        ),
+                        const SizedBox(height: AppConstants.space4),
+                        _buildVectorRow(
+                          context,
+                          'East (Parallel Tangent)',
+                          analysis.horizonBasis.east,
+                        ),
+                        const SizedBox(height: AppConstants.space4),
+                        _buildVectorRow(
+                          context,
+                          'South (SEZ Axis)',
+                          analysis.horizonBasis.south,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: AppConstants.space16),
+                ] else ...[
+                  ScientificCard(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Local Geometric & Topocentric Vectors',
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            color: theme.colorScheme.primary,
+                          ),
+                        ),
+                        const SizedBox(height: AppConstants.space8),
+                        Text(
+                          'Body-fixed Cartesian coordinates (X, Y, Z) and local topocentric SEZ basis vectors are unsupported for regional footprints without explicit point coordinates.',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                        const SizedBox(height: AppConstants.space8),
+                        const StatusBadge(
+                          label: 'REQUIRES POINT COORDINATES',
+                          color: AppColors.statusWarning,
+                          icon: Icons.info_outline,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: AppConstants.space16),
+                ],
+
+                // 5. Scientific Conditions & Mission Readiness
+                ScientificCard(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Scientific Analysis & Mission Readiness',
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          color: theme.colorScheme.primary,
+                        ),
+                      ),
+                      const SizedBox(height: AppConstants.space12),
+
+                      // Terrain Horizon Status
+                      _buildConditionRow(
+                        context: context,
+                        icon: Icons.landscape_outlined,
+                        title: 'Terrain Horizon Profile (Phase 05)',
+                        badgeLabel: 'AWAITING DEM DATASET',
+                        badgeColor: AppColors.statusWarning,
+                        description: 'Raycasting along 360° azimuths requires LOLA Product 81 (3.3 GB GeoTIFF ldem_87s_5mpp). Currently not cached in local storage.',
+                      ),
+                      const Divider(height: AppConstants.space24),
+
+                      // Solar Illumination Status
+                      _buildConditionRow(
+                        context: context,
+                        icon: Icons.wb_sunny_outlined,
+                        title: 'Solar Illumination & Elevation (Phase 06)',
+                        badgeLabel: 'EPHEMERIS PENDING',
+                        badgeColor: AppColors.darkTextTertiary,
+                        description: 'Topocentric solar elevation angle requires instantaneous Sun celestial vectors in MOON_ME_DE421 from planetary ephemeris engine (Phase 06 M04+).',
+                      ),
+                      const Divider(height: AppConstants.space24),
+
+                      // Earth Visibility Status
+                      _buildConditionRow(
+                        context: context,
+                        icon: Icons.public_outlined,
+                        title: 'Earth Visibility & Direct Comms (Phase 07)',
+                        badgeLabel: 'EPHEMERIS PENDING',
+                        badgeColor: AppColors.darkTextTertiary,
+                        description: 'Direct-to-Earth line-of-sight and topocentric elevation require instantaneous Earth celestial vectors in MOON_ME_DE421.',
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: AppConstants.space16),
+
+                // 6. Official Scientific Provenance & Citation Card
                 ScientificCard(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -237,7 +443,7 @@ class _LunarSiteDetailsPageState extends State<LunarSiteDetailsPage> {
                 ),
                 const SizedBox(height: AppConstants.space16),
 
-                // Associated NASA Datasets Card
+                // 7. Associated NASA Datasets Card
                 ScientificCard(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -305,6 +511,76 @@ class _LunarSiteDetailsPageState extends State<LunarSiteDetailsPage> {
     );
   }
 
+  Widget _buildConditionRow({
+    required BuildContext context,
+    required IconData icon,
+    required String title,
+    required String badgeLabel,
+    required Color badgeColor,
+    required String description,
+  }) {
+    final theme = Theme.of(context);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(icon, size: 20, color: theme.colorScheme.primary),
+            const SizedBox(width: AppConstants.space8),
+            Expanded(
+              child: Text(
+                title,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            StatusBadge(label: badgeLabel, color: badgeColor),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Text(
+          description,
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildVectorRow(BuildContext context, String label, dynamic vector) {
+    final theme = Theme.of(context);
+    final vx = (vector.x as double).toStringAsFixed(4);
+    final vy = (vector.y as double).toStringAsFixed(4);
+    final vz = (vector.z as double).toStringAsFixed(4);
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 170,
+          child: Text(
+            label,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+        Expanded(
+          child: Text(
+            '($vx, $vy, $vz)',
+            style: theme.textTheme.bodySmall?.copyWith(
+              fontWeight: FontWeight.w600,
+              fontFamily: 'monospace',
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _buildLinkedProductTile(BuildContext context, String productId) {
     final theme = Theme.of(context);
     final isAvailable = _assetAvailability[productId] ?? false;
@@ -369,7 +645,7 @@ class _LunarSiteDetailsPageState extends State<LunarSiteDetailsPage> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         SizedBox(
-          width: 160,
+          width: 170,
           child: Text(
             label,
             style: theme.textTheme.bodySmall?.copyWith(
