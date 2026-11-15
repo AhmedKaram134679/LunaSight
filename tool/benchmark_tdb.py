@@ -2,105 +2,315 @@
 """
 benchmark_tdb.py
 
-Independent scientific benchmarking of LunaSight's TDB-TT approximation
-against the canonical IAU SOFA / ERFA eraDtdb model (Fairhead & Bretagnon 1990 series).
+Independent scientific benchmarking of LunaSight's production TDB-TT approximation
+against direct execution of the actual compiled IAU SOFA / ERFA eraDtdb() C function
+(Fairhead & Bretagnon 1990 series).
+
+Reference Execution Architecture:
+1. Pinned Reference C Source & Headers:
+   - Upstream repository: liberfa/erfa
+   - Pinned Commit: ec968fb295d3cf0572c4f024bf3c5357d9258b7b (Release: SOFA 2023-10-11)
+   - Source files in tool/:
+       * sofa_dtdb_cached.c (LF SHA-256: 228bd7c7c1c88dda44c29a076f289c968f64d77a2dc389138b03ab5d1d442105)
+       * erfa.h             (LF SHA-256: 9549553b95ca2fbbcdcabcc69d82fb3cdd376c28b03c2793200138ff55727088)
+       * erfam.h            (LF SHA-256: 0da6313033aacf9c64533a7e74be49ecda97b4aaa87e134f98287e4ff279886f)
+2. Native Compilation & Invocation:
+   - Automatically discovers MSVC (cl.exe), GCC, or Clang.
+   - Compiles the actual C source into a temporary shared library/DLL in an isolated directory.
+   - Loads the shared library via Python ctypes.CDLL.
+   - Directly calls the exported native eraDtdb symbol with explicit c_double argument and return types.
+   - Does NOT parse, copy, vectorize, or reimplement the harmonic algorithms in Python.
+   - Deliberately refuses to fall back to any Python reimplementation if compilation fails.
+   - Cleans up all temporary binaries, object files, and export libraries upon exit.
 
 Scientific Time-Scale Methodology:
-1. Define benchmark sample epochs on a uniform Terrestrial Time (TT) timeline.
-2. Evaluate LunaSight's compact Keplerian approximation using the TT Julian Date:
-     TDB_project - TT = 0.001657 * sin(g + 0.0167 * sin(g))
-   where g = (357.53 + 35999.05 * T_TT) * (pi / 180.0), with T_TT = (JD_TT - 2451545.0) / 36525.0.
-3. The ERFA/SOFA eraDtdb routine formally accepts date1, date2 in the TDB time scale:
-     delta(TDB) = eraDtdb(date1_TDB, date2_TDB, ut=0, elong=0, u=0, v=0)
-   To supply the exact corresponding TDB instant for each TT epoch without time-scale conflation,
-   we solve for TDB iteratively using fixed-point iteration:
-     TDB_(k+1) = TT + eraDtdb(TDB_k, ...)
-   Starting from TDB_0 = TT, this converges to machine precision (< 1e-14 seconds, < 1e-8 us)
-   in 2 iterations, because |d(delta)/dt| <= 1.2e-9 << 1.
-4. Calculate residual in microseconds:
-     residual = (delta_project - delta_reference) * 1e6
-   where both refer to the exact same physical instant.
-5. All evaluations are geocentric (u = 0 km, v = 0 km, topocentric clock correction wt = 0).
+1. Official ERFA Convention:
+   The official ERFA dtdb.c documentation states (Note 1):
+     "Although the date is, formally, barycentric dynamical time (TDB),
+      the terrestrial dynamical time (TT) can be used with no practical
+      effect on the accuracy of the prediction."
+   This benchmark evaluates every sample on an explicit, uniform TT timeline and passes
+   the TT epoch directly to eraDtdb() as documented.
+2. Two-Part Precision-Preserving Julian Date:
+   Each epoch is represented using the J2000 split:
+     * date1 = 2451545.0 (J2000.0)
+     * date2 = days_from_J2000_TT
+   Avoiding subtraction cancellation and preserving full sub-nanosecond precision.
+3. LunaSight Compact Formula:
+   Evaluated with the identical days_from_J2000_TT offset:
+     * T_TT = days_from_J2000_TT / 36525.0
+     * g = (357.53 + 35999.05 * T_TT) * (pi / 180.0)
+     * delta_proj = 0.001657 * sin(g + 0.0167 * sin(g))
+4. Residual Convention:
+     residual = (delta_project - delta_reference) * 1e6  [microseconds]
+5. Geocentric Configuration:
+     ut = 0.0, elong = 0.0, u = 0.0, v = 0.0
 
-Evaluated Intervals:
-- Range A: 1950-01-01 00:00:00 TT to 2050-12-31 23:00:00 TT (Hourly, 885,360 samples)
-- Range B: 1900-01-01 00:00:00 TT to 2100-12-31 23:00:00 TT (Hourly, 1,761,936 samples)
-
-Pinned Reference Standard:
-- Library: liberfa / IAU SOFA (Release: SOFA 2023-10-11)
-- Pinned Commit: ec968fb295d3cf0572c4f024bf3c5357d9258b7b
-- Canonical Source: https://raw.githubusercontent.com/liberfa/erfa/ec968fb295d3cf0572c4f024bf3c5357d9258b7b/src/dtdb.c
-- SHA-256 (canonical LF text): 228bd7c7c1c88dda44c29a076f289c968f64d77a2dc389138b03ab5d1d442105
-- SHA-256 (local CRLF file): 147be37f458e0b5ca5793af9bfc36174b1c485b76df804f09ba89478a4123fc3
+Dependencies:
+- Python 3.8+ standard library only (ctypes, math, time, os, sys, shutil, subprocess, hashlib, tempfile).
+- A C compiler on PATH or installed via Visual Studio Build Tools / MinGW-w64.
 """
 
-import hashlib
-import math
 import os
-import re
 import sys
+import math
 import time
+import shutil
+import ctypes
+if sys.platform == "win32":
+    import ctypes.wintypes
+import hashlib
+import tempfile
+import subprocess
+from contextlib import contextmanager
 
-try:
-    import numpy as np
-
-    HAS_NUMPY = True
-except ImportError:
-    HAS_NUMPY = False
-
-CACHE_FILE = os.path.join(os.path.dirname(__file__), "sofa_dtdb_cached.c")
+TOOL_DIR = os.path.dirname(os.path.abspath(__file__))
 PINNED_COMMIT = "ec968fb295d3cf0572c4f024bf3c5357d9258b7b"
-EXPECTED_LF_SHA256 = (
-    "228bd7c7c1c88dda44c29a076f289c968f64d77a2dc389138b03ab5d1d442105"
-)
+
+EXPECTED_HASHES = {
+    "sofa_dtdb_cached.c": "228bd7c7c1c88dda44c29a076f289c968f64d77a2dc389138b03ab5d1d442105",
+    "erfa.h": "9549553b95ca2fbbcdcabcc69d82fb3cdd376c28b03c2793200138ff55727088",
+    "erfam.h": "0da6313033aacf9c64533a7e74be49ecda97b4aaa87e134f98287e4ff279886f",
+}
 
 
-def load_and_verify_dtdb_source():
-    if not os.path.exists(CACHE_FILE):
-        raise FileNotFoundError(
-            f"Cached reference file not found at: {CACHE_FILE}. "
-            "Please ensure sofa_dtdb_cached.c is present in the tool/ directory."
+class NativeErfaBuilder:
+    """Manages integrity verification, discovery, compilation, and ctypes loading of native ERFA C code."""
+
+    def __init__(self, tool_dir: str = TOOL_DIR):
+        self.tool_dir = tool_dir
+
+    def verify_checksums(self, override_dir: str = None):
+        """Verifies cryptographic SHA-256 hashes for all required C reference files."""
+        target_dir = override_dir or self.tool_dir
+        for filename, expected_hash in EXPECTED_HASHES.items():
+            path = os.path.join(target_dir, filename)
+            if not os.path.exists(path):
+                raise FileNotFoundError(f"Missing required reference file: {path}")
+            with open(path, "rb") as f:
+                content = f.read()
+            normalized = content.replace(b"\r\n", b"\n")
+            actual_hash = hashlib.sha256(normalized).hexdigest()
+            if actual_hash != expected_hash:
+                raise ValueError(
+                    f"Integrity check failed for {filename}!\n"
+                    f"Expected SHA-256: {expected_hash}\n"
+                    f"Actual SHA-256:   {actual_hash}"
+                )
+
+    def _discover_msvc_env(self):
+        """Discovers MSVC vcvars environment on Windows."""
+        candidates = []
+        vswhere_exe = r"C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe"
+        if os.path.exists(vswhere_exe):
+            cmd = [
+                vswhere_exe,
+                "-latest",
+                "-products", "*",
+                "-requires", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+                "-property", "installationPath"
+            ]
+            res = subprocess.run(cmd, capture_output=True, text=True)
+            if res.returncode == 0 and res.stdout.strip():
+                vs_dir = res.stdout.strip()
+                candidates.append(os.path.join(vs_dir, "VC", "Auxiliary", "Build", "vcvars64.bat"))
+                candidates.append(os.path.join(vs_dir, "VC", "Auxiliary", "Build", "vcvarsall.bat"))
+
+        common_roots = [
+            r"C:\Program Files\Microsoft Visual Studio\18\Community",
+            r"C:\Program Files\Microsoft Visual Studio\2022\Community",
+            r"C:\Program Files\Microsoft Visual Studio\2022\Professional",
+            r"C:\Program Files\Microsoft Visual Studio\2022\Enterprise",
+            r"C:\Program Files\Microsoft Visual Studio\2022\BuildTools",
+            r"C:\Program Files (x86)\Microsoft Visual Studio\2019\Community",
+            r"C:\Program Files (x86)\Microsoft Visual Studio\2019\Professional",
+            r"C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise",
+            r"C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools",
+        ]
+        for r in common_roots:
+            candidates.append(os.path.join(r, "VC", "Auxiliary", "Build", "vcvars64.bat"))
+            candidates.append(os.path.join(r, "VC", "Auxiliary", "Build", "vcvarsall.bat"))
+
+        for bat in candidates:
+            if os.path.exists(bat):
+                bat_arg = f'"{bat}"' if "vcvars64" in bat else f'"{bat}" x64'
+                cmd = f"{bat_arg} >nul && set"
+                res = subprocess.run(cmd, capture_output=True, text=True, shell=True)
+                if res.returncode == 0:
+                    env = {}
+                    for line in res.stdout.splitlines():
+                        if "=" in line:
+                            k, v = line.split("=", 1)
+                            env[k] = v
+                    cl = shutil.which("cl.exe", path=env.get("PATH"))
+                    if cl:
+                        return cl, env
+        return None, None
+
+    def discover_compiler(self):
+        """Finds a supported native C compiler (MSVC, GCC, or Clang)."""
+        gcc = shutil.which("gcc")
+        if gcc:
+            return "gcc", gcc, os.environ.copy()
+        clang = shutil.which("clang")
+        if clang:
+            return "clang", clang, os.environ.copy()
+        cl = shutil.which("cl.exe")
+        if cl:
+            return "msvc", cl, os.environ.copy()
+        if sys.platform == "win32":
+            cl, env = self._discover_msvc_env()
+            if cl and env:
+                return "msvc", cl, env
+
+        raise RuntimeError(
+            "No suitable C compiler (MSVC cl.exe, gcc, or clang) found on this system.\n"
+            "To build the native reference library, install Visual Studio C++ Build Tools or MinGW-w64,\n"
+            "or run from a Developer Command Prompt for Visual Studio.\n"
+            "Silent fallback to Python reimplementation is strictly prohibited."
         )
 
-    with open(CACHE_FILE, "rb") as f:
-        raw_bytes = f.read()
+    @contextmanager
+    def compiled_library(self):
+        """Compiles sofa_dtdb_cached.c into a temporary shared library and yields the eraDtdb callable."""
+        self.verify_checksums()
+        compiler_type, compiler_bin, env = self.discover_compiler()
+        c_src = os.path.join(self.tool_dir, "sofa_dtdb_cached.c")
 
-    # Verify text checksum after normalizing newlines to canonical LF:
-    normalized_lf = raw_bytes.replace(b"\r\n", b"\n")
-    actual_lf_sha256 = hashlib.sha256(normalized_lf).hexdigest()
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            if compiler_type == "msvc":
+                dll_path = os.path.join(tmp_dir, "sofa_dtdb.dll")
+                cmd = [
+                    compiler_bin,
+                    "/O2",
+                    "/LD",
+                    "/nologo",
+                    f"/I{self.tool_dir}",
+                    c_src,
+                    f"/Fe:{dll_path}",
+                    "/link",
+                    "/EXPORT:eraDtdb",
+                ]
+            else:
+                ext = ".dll" if sys.platform == "win32" else ".so"
+                dll_path = os.path.join(tmp_dir, f"libsofa_dtdb{ext}")
+                cmd = [
+                    compiler_bin,
+                    "-O3",
+                    "-shared",
+                    "-fPIC",
+                    f"-I{self.tool_dir}",
+                    c_src,
+                    "-o",
+                    dll_path,
+                ]
 
-    if actual_lf_sha256 != EXPECTED_LF_SHA256:
-        raise ValueError(
-            f"SHA256 mismatch for reference source in {CACHE_FILE}!\n"
-            f"Expected: {EXPECTED_LF_SHA256}\n"
-            f"Actual:   {actual_lf_sha256}"
-        )
+            res = subprocess.run(cmd, capture_output=True, text=True, env=env, cwd=tmp_dir)
+            if res.returncode != 0:
+                raise RuntimeError(
+                    f"Compilation of ERFA C reference failed (exit code {res.returncode}):\n"
+                    f"STDOUT: {res.stdout}\n"
+                    f"STDERR: {res.stderr}\n"
+                    "Silent fallback to Python reimplementation is strictly prohibited."
+                )
 
-    return normalized_lf.decode("utf-8")
+            if not os.path.exists(dll_path):
+                raise FileNotFoundError(f"Shared library output was not created at: {dll_path}")
+
+            lib = ctypes.CDLL(dll_path)
+            if not hasattr(lib, "eraDtdb"):
+                raise AttributeError("Compiled library does not export required symbol 'eraDtdb'")
+
+            eraDtdb = lib.eraDtdb
+            eraDtdb.argtypes = [
+                ctypes.c_double,  # date1
+                ctypes.c_double,  # date2
+                ctypes.c_double,  # ut
+                ctypes.c_double,  # elong
+                ctypes.c_double,  # u
+                ctypes.c_double,  # v
+            ]
+            eraDtdb.restype = ctypes.c_double
+
+            try:
+                yield eraDtdb
+            finally:
+                if sys.platform == "win32":
+                    ctypes.windll.kernel32.FreeLibrary.argtypes = [ctypes.wintypes.HMODULE]
+                    ctypes.windll.kernel32.FreeLibrary(lib._handle)
+                del lib
 
 
-def parse_fairhd_coefficients(code: str):
-    start_idx = code.find("static const double fairhd[787][3] = {")
-    end_idx = code.find("};", start_idx)
-    table_text = code[start_idx:end_idx]
-    pattern = re.compile(
-        r"\{\s*([0-9.eE+-]+)\s*,\s*([0-9.eE+-]+)\s*,\s*([0-9.eE+-]+)\s*\}"
-    )
-    matches = pattern.findall(table_text)
-    if len(matches) != 787:
-        raise ValueError(f"Expected 787 coefficient sets, found {len(matches)}")
-    return [(float(a), float(f), float(p)) for a, f, p in matches]
+def run_self_tests(builder: NativeErfaBuilder) -> bool:
+    """Executes focused validation suite proving native reference execution."""
+    print("=" * 70)
+    print("LunaSight Phase 06: Native Reference Self-Tests")
+    print("=" * 70)
+
+    # 1. Symbol Export & Execution
+    print("[1/5] Verifying library compilation and symbol export...")
+    with builder.compiled_library() as eraDtdb:
+        assert callable(eraDtdb), "eraDtdb is not callable"
+        print("      PASS: eraDtdb compiled, loaded, and exported successfully.")
+
+        # 2. Official ERFA Test Vector
+        print("[2/5] Running official ERFA test vector...")
+        test_val = eraDtdb(2448939.5, 0.123, 0.76543, 5.0123, 5525.242, 3190.0)
+        expected = -0.1280368005936998991e-2
+        err = abs(test_val - expected)
+        assert err < 1e-15, f"Test vector error {err} exceeds official tolerance 1e-15"
+        print(f"      PASS: Output = {test_val:.20e}")
+        print(f"            Error  = {err:.5e} (tolerance < 1e-15)")
+
+        # 3. Geocentric Invocation Test
+        print("[3/5] Running geocentric zero-topocentric parameter test...")
+        geo_val = eraDtdb(2451545.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+        assert -0.002 < geo_val < 0.002, f"Geocentric result {geo_val} exceeds 2 ms bound"
+        assert abs(geo_val * 1e6 - (-99.3072)) < 0.01, f"Unexpected J2000 value: {geo_val*1e6} us"
+        print(f"      PASS: Geocentric value at J2000 = {geo_val*1e6:.4f} us (expected -99.3072 us)")
+
+    # 4. Explicit Failure on Deliberate Compiler Error
+    print("[4/5] Verifying explicit failure on compilation errors (no fallback)...")
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        for fn in ["erfa.h", "erfam.h"]:
+            shutil.copy(os.path.join(builder.tool_dir, fn), os.path.join(tmp_dir, fn))
+        with open(os.path.join(tmp_dir, "sofa_dtdb_cached.c"), "w") as f:
+            f.write("#include \"erfa.h\"\nINVALID_SYNTAX_ERROR;\n")
+        bad_builder = NativeErfaBuilder(tool_dir=tmp_dir)
+        bad_builder.verify_checksums = lambda override_dir=None: True
+        failed_cleanly = False
+        try:
+            with bad_builder.compiled_library():
+                pass
+        except RuntimeError:
+            failed_cleanly = True
+        assert failed_cleanly, "Did not raise RuntimeError on compilation failure!"
+        print("      PASS: Raised RuntimeError as required; refused to fall back.")
+
+    # 5. Checksum Validation Rejection
+    print("[5/5] Verifying cryptographic rejection of modified cached source...")
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        for fn in ["erfa.h", "erfam.h"]:
+            shutil.copy(os.path.join(builder.tool_dir, fn), os.path.join(tmp_dir, fn))
+        with open(os.path.join(tmp_dir, "sofa_dtdb_cached.c"), "wb") as f:
+            f.write(b"/* tampered source code */\n")
+        tampered_builder = NativeErfaBuilder(tool_dir=tmp_dir)
+        checksum_rejected = False
+        try:
+            tampered_builder.verify_checksums()
+        except ValueError:
+            checksum_rejected = True
+        assert checksum_rejected, "Tampered source was not rejected!"
+        print("      PASS: Checksum mismatch rejected prior to compilation.")
+
+    print("\nALL 5 NATIVE REFERENCE SELF-TESTS PASSED!")
+    print("=" * 70)
+    return True
 
 
-def project_tdb_minus_tt(jd_tt: float) -> float:
-    """Evaluates LunaSight's production compact Keplerian approximation."""
-    tCenturies = (jd_tt - 2451545.0) / 36525.0
-    gRad = (357.53 + 35999.05 * tCenturies) * (math.pi / 180.0)
-    return 0.001657 * math.sin(gRad + 0.0167 * math.sin(gRad))
-
-
-def jd_to_tt_calendar(jd: float) -> str:
-    """Converts a Julian Date on the TT scale to a standard calendar string."""
+def jd_to_tt_calendar(days_from_j2000: float) -> str:
+    """Converts a J2000-offset Julian Date on the TT scale to a standard calendar string."""
+    jd = 2451545.0 + days_from_j2000
     z = math.floor(jd + 0.5)
     f = (jd + 0.5) - z
     if z < 2299161:
@@ -120,7 +330,6 @@ def jd_to_tt_calendar(jd: float) -> str:
     minute = (hour - h) * 60.0
     m = math.floor(minute)
     s = (minute - m) * 60.0
-    # Handle second rounding overflow (e.g. 59.9999 -> 60.0)
     if round(s, 1) >= 60.0:
         s = 0.0
         m += 1
@@ -133,41 +342,20 @@ def jd_to_tt_calendar(jd: float) -> str:
     return f"{year:04d}-{month:02d}-{day:02d} {h:02d}:{m:02d}:{s:04.1f} TT"
 
 
-def run_benchmark_vectorized(name, jd_start, jd_end, step, fairhd):
-    """Executes high-speed hourly benchmark using NumPy vectorized chunks."""
-    amp = np.array([f[0] for f in fairhd])
-    freq = np.array([f[1] for f in fairhd])
-    phase = np.array([f[2] for f in fairhd])
+def run_benchmark_range(name: str, eraDtdb, start_jd: float, end_jd: float, step_days: float):
+    """Executes full hourly sampling of production compact formula against native compiled eraDtdb()."""
+    date1 = 2451545.0  # J2000.0 split
+    d_start = start_jd - date1
+    d_end = end_jd - date1
+    N = int(round((d_end - d_start) / step_days)) + 1
 
-    def era_dtdb_vec(t_arr):
-        args = np.outer(freq, t_arr) + phase[:, None]
-        sins = np.sin(args) * amp[:, None]
+    print(f"\nExecuting Benchmark: {name}")
+    print(f"  Sample Count:      {N:,} samples")
+    print(f"  Step Size:         {step_days * 86400.0:.0f} s (1 hour)")
+    print(f"  Start Epoch (TT):  {jd_to_tt_calendar(d_start)} (JD {start_jd:.4f} TT)")
+    print(f"  End Epoch (TT):    {jd_to_tt_calendar(d_end)} (JD {end_jd:.4f} TT)")
 
-        w0 = np.sum(sins[0:474, :], axis=0)
-        w1 = np.sum(sins[474:679, :], axis=0)
-        w2 = np.sum(sins[679:764, :], axis=0)
-        w3 = np.sum(sins[764:784, :], axis=0)
-        w4 = np.sum(sins[784:787, :], axis=0)
-
-        wf = t_arr * (t_arr * (t_arr * (t_arr * w4 + w3) + w2) + w1) + w0
-
-        wj = (
-            0.00065e-6 * np.sin(6069.776754 * t_arr + 4.021194)
-            + 0.00033e-6 * np.sin(213.299095 * t_arr + 5.543132)
-            + (-0.00196e-6 * np.sin(6208.294251 * t_arr + 5.696701))
-            + (-0.00173e-6 * np.sin(74.781599 * t_arr + 2.435900))
-            + 0.03638e-6 * t_arr * t_arr
-        )
-        return wf + wj
-
-    def project_vec(jd_arr):
-        tCent = (jd_arr - 2451545.0) / 36525.0
-        g = (357.53 + 35999.05 * tCent) * (np.pi / 180.0)
-        return 0.001657 * np.sin(g + 0.0167 * np.sin(g))
-
-    N = int(round((jd_end - jd_start) / step)) + 1
-    chunk_size = 50000
-
+    pi_over_180 = math.pi / 180.0
     max_abs = 0.0
     max_idx = 0
     sum_sq = 0.0
@@ -176,115 +364,129 @@ def run_benchmark_vectorized(name, jd_start, jd_end, step, fairhd):
     max_signed = float("-inf")
 
     t0 = time.time()
-    for i in range(0, N, chunk_size):
-        chunk_n = min(chunk_size, N - i)
-        jd_chunk = jd_start + (i + np.arange(chunk_n)) * step
+    for i in range(N):
+        d2 = d_start + i * step_days
 
-        # Exact TDB determination via fixed-point iteration:
-        # Starting guess: TDB = TT
-        t_guess = (jd_chunk - 2451545.0) / 365250.0
-        # Iteration 1:
-        delta1 = era_dtdb_vec(t_guess)
-        # Iteration 2:
-        t_guess = (jd_chunk + delta1 / 86400.0 - 2451545.0) / 365250.0
-        ref_delta = era_dtdb_vec(t_guess)
+        # Call the actual native C function:
+        ref = eraDtdb(date1, d2, 0.0, 0.0, 0.0, 0.0)
 
-        proj_delta = project_vec(jd_chunk)
-        res_us = (proj_delta - ref_delta) * 1e6
+        # LunaSight production compact formula (evaluated from J2000 offset):
+        t_centuries = d2 / 36525.0
+        g = (357.53 + 35999.05 * t_centuries) * pi_over_180
+        proj = 0.001657 * math.sin(g + 0.0167 * math.sin(g))
 
-        c_max_abs = np.max(np.abs(res_us))
-        if c_max_abs > max_abs:
-            max_abs = c_max_abs
-            local_idx = np.argmax(np.abs(res_us))
-            max_idx = i + local_idx
+        res_us = (proj - ref) * 1e6
 
-        c_min = np.min(res_us)
-        if c_min < min_signed:
-            min_signed = c_min
+        sum_signed += res_us
+        sum_sq += res_us * res_us
+        if res_us < min_signed:
+            min_signed = res_us
+        if res_us > max_signed:
+            max_signed = res_us
+        abs_res = abs(res_us)
+        if abs_res > max_abs:
+            max_abs = abs_res
+            max_idx = i
 
-        c_max = np.max(res_us)
-        if c_max > max_signed:
-            max_signed = c_max
-
-        sum_sq += np.sum(res_us**2)
-        sum_signed += np.sum(res_us)
-
-    elapsed = time.time() - t0
-    rms = np.sqrt(sum_sq / N)
+    dt = time.time() - t0
     mean_signed = sum_signed / N
-    max_epoch_jd = jd_start + max_idx * step
-    max_epoch_str = jd_to_tt_calendar(max_epoch_jd)
+    rms = math.sqrt(sum_sq / N)
+    peak_d2 = d_start + max_idx * step_days
+    peak_jd = date1 + peak_d2
+    peak_cal = jd_to_tt_calendar(peak_d2)
+
+    print(f"  Completed in:      {dt:.2f} s ({N/dt:.0f} samples/s)")
+    print(f"  RMS Residual:      {rms:.4f} us")
+    print(f"  Mean Signed:       {mean_signed:.4f} us")
+    print(f"  Min Signed:        {min_signed:.4f} us")
+    print(f"  Max Signed:        {max_signed:.4f} us")
+    print(f"  Max Absolute:      {max_abs:.4f} us")
+    print(f"  Peak Epoch:        {peak_cal} (JD {peak_jd:.4f} TT)")
 
     return {
         "name": name,
         "sample_count": N,
-        "sampling_interval": "1 hour (3600 s TT)",
-        "rms_us": float(rms),
-        "mean_signed_us": float(mean_signed),
-        "max_abs_us": float(max_abs),
-        "min_signed_us": float(min_signed),
-        "max_signed_us": float(max_signed),
-        "max_epoch_jd": float(max_epoch_jd),
-        "max_epoch_str": max_epoch_str,
-        "elapsed_sec": elapsed,
+        "elapsed_sec": dt,
+        "rms_us": rms,
+        "mean_signed_us": mean_signed,
+        "min_signed_us": min_signed,
+        "max_signed_us": max_signed,
+        "max_abs_us": max_abs,
+        "peak_epoch": peak_cal,
+        "peak_jd": peak_jd,
     }
 
 
+def evaluate_reference_epochs(eraDtdb):
+    """Evaluates canonical key epochs directly against the compiled native reference function."""
+    date1 = 2451545.0
+    key_epochs = [
+        ("1900-01-01 00:00:00 TT", 2415020.500000),
+        ("1901-10-05 19:00:00 TT (Peak B)", 2415663.291667),
+        ("1950-01-01 00:00:00 TT", 2433282.500000),
+        ("1960-10-12 01:00:00 TT (Peak A)", 2437219.541667),
+        ("2000-01-01 12:00:00 TT (J2000)", 2451545.000000),
+        ("2000-02-29 00:00:00 TT", 2451603.500000),
+        ("2024-02-29 00:00:00 TT", 2460369.500000),
+        ("2026-11-15 00:00:00 TT", 2461359.500000),
+        ("2050-12-31 23:00:00 TT", 2470172.458333),
+        ("2100-12-31 23:00:00 TT", 2488434.458333),
+    ]
+
+    print("\n" + "=" * 80)
+    print("KEY REFERENCE EPOCHS EVALUATION (NATIVE eraDtdb)")
+    print("=" * 80)
+    print(f"{'Epoch (TT)':<35} {'JD (TT)':<16} {'IAU eraDtdb':<16} {'LunaSight':<16} {'Residual'}")
+    print("-" * 80)
+
+    pi_over_180 = math.pi / 180.0
+    for label, jd in key_epochs:
+        d2 = jd - date1
+        ref = eraDtdb(date1, d2, 0.0, 0.0, 0.0, 0.0)
+        t_centuries = d2 / 36525.0
+        g = (357.53 + 35999.05 * t_centuries) * pi_over_180
+        proj = 0.001657 * math.sin(g + 0.0167 * math.sin(g))
+        res_us = (proj - ref) * 1e6
+        print(f"{label:<35} {jd:<16.6f} {ref*1e6:>13.4f} us {proj*1e6:>13.4f} us {res_us:>+10.4f} us")
+    print("=" * 80)
+
+
 def main():
-    print("=" * 70)
-    print("LunaSight Phase 06: Independent TDB-TT Scientific Benchmark")
-    print("=" * 70)
+    builder = NativeErfaBuilder()
 
-    code = load_and_verify_dtdb_source()
-    fairhd = parse_fairhd_coefficients(code)
+    if "--self-test" in sys.argv:
+        run_self_tests(builder)
+        return 0
 
-    print(f"Reference Source: liberfa/erfa (Commit {PINNED_COMMIT[:7]})")
-    print(f"Verified Source LF SHA-256: {EXPECTED_LF_SHA256}")
-    print(f"Total Fairhead & Bretagnon harmonic sets: {len(fairhd)}")
-    print(f"NumPy Acceleration: {'Enabled' if HAS_NUMPY else 'Disabled'}")
-    print("-" * 70)
+    run_self_tests(builder)
 
-    # Range A: 1950-01-01 00:00:00 TT to 2050-12-31 23:00:00 TT
-    # 1950-01-01 00:00:00 TT: JD = 2433282.5
-    # 2050-12-31 23:00:00 TT: JD = 2470171.5 + 23/24 = 2470172.4583333335
-    jd_a_start = 2433282.5
-    jd_a_end = 2470171.5 + 23.0 / 24.0
-    step_hourly = 1.0 / 24.0
+    with builder.compiled_library() as eraDtdb:
+        evaluate_reference_epochs(eraDtdb)
 
-    print("Executing Benchmark Range A (1950–2050, Hourly)...")
-    res_a = run_benchmark_vectorized(
-        "Range A: 1950–2050", jd_a_start, jd_a_end, step_hourly, fairhd
-    )
-    print(f"Completed in {res_a['elapsed_sec']:.2f} s")
+        # Range A: 1950-01-01 00:00:00 TT to 2050-12-31 23:00:00 TT
+        # 1950-01-01 00:00:00 TT = JD 2433282.5
+        # 2050-12-31 23:00:00 TT = JD 2470172.4583333335
+        run_benchmark_range(
+            "Range A: 1950–2050 (Hourly)",
+            eraDtdb,
+            start_jd=2433282.5,
+            end_jd=2470172.4583333335,
+            step_days=1.0 / 24.0,
+        )
 
-    # Range B: 1900-01-01 00:00:00 TT to 2100-12-31 23:00:00 TT
-    # 1900-01-01 00:00:00 TT: JD = 2415020.5
-    # 2100-12-31 23:00:00 TT: JD = 2488433.5 + 23/24 = 2488434.4583333335
-    jd_b_start = 2415020.5
-    jd_b_end = 2488433.5 + 23.0 / 24.0
+        # Range B: 1900-01-01 00:00:00 TT to 2100-12-31 23:00:00 TT
+        # 1900-01-01 00:00:00 TT = JD 2415020.5
+        # 2100-12-31 23:00:00 TT = JD 2488434.4583333335
+        run_benchmark_range(
+            "Range B: 1900–2100 (Hourly)",
+            eraDtdb,
+            start_jd=2415020.5,
+            end_jd=2488434.4583333335,
+            step_days=1.0 / 24.0,
+        )
 
-    print("Executing Benchmark Range B (1900–2100, Hourly)...")
-    res_b = run_benchmark_vectorized(
-        "Range B: 1900–2100", jd_b_start, jd_b_end, step_hourly, fairhd
-    )
-    print(f"Completed in {res_b['elapsed_sec']:.2f} s")
-
-    print("\n" + "=" * 70)
-    print("VERIFIED NUMERICAL BENCHMARK RESULTS")
-    print("=" * 70)
-    for r in [res_a, res_b]:
-        print(f"Dataset:                  {r['name']}")
-        print(f"Sample Count:             {r['sample_count']:,} samples")
-        print(f"Sampling Interval:        {r['sampling_interval']}")
-        print(f"RMS Residual:             {r['rms_us']:.4f} us")
-        print(f"Mean Signed Residual:     {r['mean_signed_us']:.4f} us")
-        print(f"Minimum Signed Residual:  {r['min_signed_us']:.4f} us")
-        print(f"Maximum Signed Residual:  {r['max_signed_us']:.4f} us")
-        print(f"Maximum Absolute Residual:{r['max_abs_us']:.4f} us")
-        print(f"Epoch of Maximum Abs Res: {r['max_epoch_str']}")
-        print(f"Julian Date at Max:       {r['max_epoch_jd']:.4f} TT")
-        print("-" * 70)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
