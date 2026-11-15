@@ -126,9 +126,19 @@ class AstronomicalTime {
   /// $$T = \frac{JD - 2451545.0}{36525.0}$$
   double get julianCenturiesSinceJ2000 => (julianDate - j2000Epoch) / 36525.0;
 
+  /// Calculates the high-precision difference in seconds $(\text{this} - \text{other})$:
+  /// $$\Delta t = (\text{this.jdBase} - \text{other.jdBase}) \times 86400 + (\text{this.secondOfDay} - \text{other.secondOfDay})$$
+  /// Preserves sub-microsecond precision by avoiding cancellation in single-precision floats.
+  double differenceInSeconds(AstronomicalTime other) {
+    final baseDiffDays = jdBase - other.jdBase;
+    final secDiff = secondOfDay - other.secondOfDay;
+    return baseDiffDays * secondsPerDay + secDiff;
+  }
+
   /// Converts this astronomical time to Terrestrial Time ([TimeScale.tt]).
   AstronomicalTime toTerrestrialTime({
     LeapSecondProvider leapSecondProvider = const LeapSecondProvider(),
+    bool allowExtrapolation = false,
   }) {
     if (scale == TimeScale.tt) {
       return this;
@@ -140,9 +150,12 @@ class AstronomicalTime {
     }
 
     if (scale == TimeScale.utc) {
-      final utcDt = toUtcDateTime();
+      final utcDt = toUtcDateTime(
+        leapSecondProvider: leapSecondProvider,
+        allowExtrapolation: allowExtrapolation,
+      );
       final taiMinusUtc = leapSecondProvider
-          .getTaiMinusUtcSeconds(utcDt)
+          .getTaiMinusUtcSeconds(utcDt, allowExtrapolation: allowExtrapolation)
           .toDouble();
       final totalOffsetSeconds = taiMinusUtc + ttMinusTaiSeconds;
       return _addSeconds(totalOffsetSeconds, TimeScale.tt);
@@ -168,12 +181,16 @@ class AstronomicalTime {
   /// Converts this astronomical time to Barycentric Dynamical Time ([TimeScale.tdb]).
   AstronomicalTime toBarycentricDynamicalTime({
     LeapSecondProvider leapSecondProvider = const LeapSecondProvider(),
+    bool allowExtrapolation = false,
   }) {
     if (scale == TimeScale.tdb) {
       return this;
     }
 
-    final tt = toTerrestrialTime(leapSecondProvider: leapSecondProvider);
+    final tt = toTerrestrialTime(
+      leapSecondProvider: leapSecondProvider,
+      allowExtrapolation: allowExtrapolation,
+    );
     final tCenturies = tt.julianCenturiesSinceJ2000;
 
     // USNO / Fairhead & Bretagnon circular approximation for TDB - TT:
@@ -188,25 +205,37 @@ class AstronomicalTime {
   /// If the current scale is not UTC, it is converted to UTC using [leapSecondProvider].
   DateTime toUtcDateTime({
     LeapSecondProvider leapSecondProvider = const LeapSecondProvider(),
+    bool allowExtrapolation = false,
   }) {
     if (scale != TimeScale.utc) {
       if (scale == TimeScale.tdb) {
-        final tt = toTerrestrialTime(leapSecondProvider: leapSecondProvider);
-        return tt.toUtcDateTime(leapSecondProvider: leapSecondProvider);
+        final tt = toTerrestrialTime(
+          leapSecondProvider: leapSecondProvider,
+          allowExtrapolation: allowExtrapolation,
+        );
+        return tt.toUtcDateTime(
+          leapSecondProvider: leapSecondProvider,
+          allowExtrapolation: allowExtrapolation,
+        );
       }
 
       if (scale == TimeScale.tt) {
         // Approximate reverse to TAI:
         final tai = _addSeconds(-ttMinusTaiSeconds, TimeScale.tai);
-        return tai.toUtcDateTime(leapSecondProvider: leapSecondProvider);
+        return tai.toUtcDateTime(
+          leapSecondProvider: leapSecondProvider,
+          allowExtrapolation: allowExtrapolation,
+        );
       }
 
       if (scale == TimeScale.tai) {
-        // For TAI to UTC, we must find the leap-second offset.
-        // We estimate initial UTC date using approximate offset (37s), look up offset, then refine.
+        // For TAI to UTC, we find the leap-second offset:
         final roughUtc = _splitToDateTime(jdBase, secondOfDay - 37.0);
         final offset = leapSecondProvider
-            .getTaiMinusUtcSeconds(roughUtc)
+            .getTaiMinusUtcSeconds(
+              roughUtc,
+              allowExtrapolation: allowExtrapolation,
+            )
             .toDouble();
         return _splitToDateTime(jdBase, secondOfDay - offset);
       }

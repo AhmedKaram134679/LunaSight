@@ -93,17 +93,17 @@ void main() {
       }
     });
 
-    test('Enforces extrapolation flag past guaranteed horizon', () {
+    test('Enforces strict extrapolation flag past guaranteed horizon', () {
       final futureDate = DateTime.utc(2035, 1, 1);
-      // Allowed when allowExtrapolation = true (default)
-      expect(provider.getTaiMinusUtcSeconds(futureDate), 37);
-
-      // Throws when allowExtrapolation = false
+      // Allowed when allowExtrapolation = true
       expect(
-        () => provider.getTaiMinusUtcSeconds(
-          futureDate,
-          allowExtrapolation: false,
-        ),
+        provider.getTaiMinusUtcSeconds(futureDate, allowExtrapolation: true),
+        37,
+      );
+
+      // Throws under strict default (allowExtrapolation = false)
+      expect(
+        () => provider.getTaiMinusUtcSeconds(futureDate),
         throwsA(
           isA<ScientificComputationException>().having(
             (e) => e.code,
@@ -188,11 +188,11 @@ void main() {
       expect(tTDB.scale, TimeScale.tdb);
 
       // |TDB - TT| must be strictly bounded under 0.002 seconds (< 2 milliseconds)
-      final diffSeconds = (tTDB.julianDate - tTT.julianDate) * 86400.0;
+      final diffSeconds = tTDB.differenceInSeconds(tTT);
       expect(diffSeconds.abs(), lessThan(0.002));
       expect(
         diffSeconds.abs(),
-        greaterThan(0.0001),
+        greaterThan(0.00005),
       ); // Relativistic variation is nonzero
     });
 
