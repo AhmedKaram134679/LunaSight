@@ -393,9 +393,33 @@ class _SiteComparisonPageState extends State<SiteComparisonPage> {
             ),
           ],
           const SizedBox(height: AppConstants.space12),
-          Align(
-            alignment: Alignment.centerRight,
-            child: _buildDetailsLink(site),
+          Wrap(
+            spacing: AppConstants.space8,
+            runSpacing: AppConstants.space4,
+            children: [
+              _buildDetailsLink(site),
+              OutlinedButton.icon(
+                icon: const Icon(Icons.wb_sunny_outlined, size: 14),
+                label: const Text('Visibility', style: TextStyle(fontSize: 12)),
+                style: OutlinedButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                ),
+                onPressed: () {
+                  Navigator.of(context)
+                      .pushNamed('/visibility', arguments: site);
+                },
+              ),
+              OutlinedButton.icon(
+                icon: const Icon(Icons.access_time_rounded, size: 14),
+                label: const Text('Planner', style: TextStyle(fontSize: 12)),
+                style: OutlinedButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                ),
+                onPressed: () {
+                  Navigator.of(context).pushNamed('/planner', arguments: site);
+                },
+              ),
+            ],
           ),
         ],
       ),

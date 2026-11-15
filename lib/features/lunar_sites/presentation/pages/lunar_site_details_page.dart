@@ -502,6 +502,59 @@ class _LunarSiteDetailsPageState extends State<LunarSiteDetailsPage> {
                     ],
                   ),
                 ),
+                const SizedBox(height: AppConstants.space16),
+
+                // 8. Action Workflows Card
+                ScientificCard(
+                  borderColor: theme.colorScheme.primary.withValues(alpha: 0.4),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Launch Mission Analysis Workflows',
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          color: theme.colorScheme.primary,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: AppConstants.space8),
+                      Text(
+                        'Perform interactive topocentric celestial angle tracking, daylight simulation, and timeline planning for ${site.name}:',
+                        style: theme.textTheme.bodySmall,
+                      ),
+                      const SizedBox(height: AppConstants.space16),
+                      Wrap(
+                        spacing: AppConstants.space12,
+                        runSpacing: AppConstants.space8,
+                        children: [
+                          FilledButton.icon(
+                            onPressed: () {
+                              Navigator.of(context)
+                                  .pushNamed('/visibility', arguments: site);
+                            },
+                            icon: const Icon(Icons.wb_sunny_rounded),
+                            label: const Text('Solar & Earth Visibility'),
+                          ),
+                          FilledButton.tonalIcon(
+                            onPressed: () {
+                              Navigator.of(context)
+                                  .pushNamed('/planner', arguments: site);
+                            },
+                            icon: const Icon(Icons.access_time_rounded),
+                            label: const Text('Mission Time Planner'),
+                          ),
+                          OutlinedButton.icon(
+                            onPressed: () {
+                              Navigator.of(context).pushNamed('/sites/compare');
+                            },
+                            icon: const Icon(Icons.compare_arrows_rounded),
+                            label: const Text('Compare Candidates'),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
                 const SizedBox(height: AppConstants.space24),
               ],
             ),

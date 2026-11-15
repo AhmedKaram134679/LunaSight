@@ -4,6 +4,8 @@ import 'package:luna_sight/core/error/failures.dart';
 import 'package:luna_sight/core/logging/app_logger.dart';
 import 'package:luna_sight/features/home/presentation/pages/home_page.dart';
 import 'package:luna_sight/features/lunar_sites/lunar_sites.dart';
+import 'package:luna_sight/features/solar_earth_visibility/presentation/pages/mission_time_planner_page.dart';
+import 'package:luna_sight/features/solar_earth_visibility/presentation/pages/visibility_analysis_page.dart';
 
 /// Centralized navigation and route generation for LunaSight.
 ///
@@ -18,6 +20,13 @@ class AppRouter {
   static const String siteDetailsRoute = '/sites/details';
   static const String customSiteRoute = '/sites/custom';
   static const String compareSitesRoute = '/sites/compare';
+  static const String visibilityRoute = '/visibility';
+  static const String plannerRoute = '/planner';
+
+  /// Shared singleton repository instance ensuring user-added custom sites
+  /// persist seamlessly across navigation routes during the application lifecycle.
+  static final LunarSiteRepository sharedRepository =
+      LocalLunarSiteRepository();
 
   /// Generates routes dynamically based on incoming [RouteSettings].
   static Route<dynamic> onGenerateRoute(RouteSettings settings) {
@@ -32,22 +41,41 @@ class AppRouter {
 
       case sitesRoute:
         return MaterialPageRoute<void>(
-          builder: (_) =>
-              LunarSiteExplorerPage(repository: LocalLunarSiteRepository()),
+          builder: (_) => LunarSiteExplorerPage(repository: sharedRepository),
           settings: settings,
         );
 
       case customSiteRoute:
         return MaterialPageRoute<void>(
-          builder: (_) =>
-              CustomSiteEntryPage(repository: LocalLunarSiteRepository()),
+          builder: (_) => CustomSiteEntryPage(repository: sharedRepository),
           settings: settings,
         );
 
       case compareSitesRoute:
         return MaterialPageRoute<void>(
-          builder: (_) =>
-              SiteComparisonPage(repository: LocalLunarSiteRepository()),
+          builder: (_) => SiteComparisonPage(repository: sharedRepository),
+          settings: settings,
+        );
+
+      case visibilityRoute:
+        final arg = settings.arguments;
+        final initialSite = arg is LunarSite ? arg : null;
+        return MaterialPageRoute<void>(
+          builder: (_) => VisibilityAnalysisPage(
+            initialSite: initialSite,
+            repository: sharedRepository,
+          ),
+          settings: settings,
+        );
+
+      case plannerRoute:
+        final arg = settings.arguments;
+        final initialSite = arg is LunarSite ? arg : null;
+        return MaterialPageRoute<void>(
+          builder: (_) => MissionTimePlannerPage(
+            initialSite: initialSite,
+            repository: sharedRepository,
+          ),
           settings: settings,
         );
 

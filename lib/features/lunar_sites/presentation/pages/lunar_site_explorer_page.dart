@@ -7,11 +7,12 @@ import 'package:luna_sight/features/lunar_sites/domain/repositories/lunar_site_r
 import 'package:luna_sight/features/lunar_sites/presentation/pages/custom_site_entry_page.dart';
 import 'package:luna_sight/features/lunar_sites/presentation/pages/lunar_site_details_page.dart';
 import 'package:luna_sight/features/lunar_sites/presentation/pages/site_comparison_page.dart';
+import 'package:luna_sight/features/lunar_sites/presentation/widgets/lunar_polar_map_widget.dart';
 import 'package:luna_sight/features/lunar_sites/presentation/widgets/lunar_site_card.dart';
 import 'package:luna_sight/features/nasa_data/nasa_data.dart';
 
-/// Interactive Lunar Site Explorer page featuring search, classification filtering,
-/// responsive grid/list presentation, and custom site creation.
+/// Interactive Lunar Site Explorer page featuring interactive polar stereographic mapping,
+/// search, classification filtering, responsive grid/list presentation, and custom site creation.
 class LunarSiteExplorerPage extends StatefulWidget {
   final LunarSiteRepository repository;
   final NasaDataRepository? nasaDataRepository;
@@ -35,6 +36,8 @@ class _LunarSiteExplorerPageState extends State<LunarSiteExplorerPage> {
 
   SiteClassification? _selectedClassification;
   bool _filterHasCoordinatesOnly = false;
+  bool _showPolarMap = false;
+  LunarSite? _mapSelectedSite;
 
   @override
   void initState() {
@@ -59,6 +62,12 @@ class _LunarSiteExplorerPageState extends State<LunarSiteExplorerPage> {
       if (!mounted) return;
       setState(() {
         _allSites = sites;
+        if (sites.isNotEmpty && _mapSelectedSite == null) {
+          _mapSelectedSite = sites.firstWhere(
+            (s) => s.siteCode == 'Site04',
+            orElse: () => sites.first,
+          );
+        }
         _isLoading = false;
       });
       _applyFilters();
@@ -143,6 +152,34 @@ class _LunarSiteExplorerPageState extends State<LunarSiteExplorerPage> {
         title: const Text('Lunar Site Explorer'),
         actions: [
           IconButton(
+            tooltip: _showPolarMap ? 'Hide Polar Map' : 'Show Polar Map',
+            icon: Icon(
+              _showPolarMap ? Icons.map_rounded : Icons.radar_rounded,
+              color: _showPolarMap ? theme.colorScheme.primary : null,
+            ),
+            onPressed: () {
+              setState(() {
+                _showPolarMap = !_showPolarMap;
+              });
+            },
+          ),
+          IconButton(
+            tooltip: 'Solar & Earth Visibility',
+            icon: const Icon(Icons.wb_sunny_outlined),
+            onPressed: () {
+              Navigator.of(context)
+                  .pushNamed('/visibility', arguments: _mapSelectedSite);
+            },
+          ),
+          IconButton(
+            tooltip: 'Mission Time Planner',
+            icon: const Icon(Icons.access_time_rounded),
+            onPressed: () {
+              Navigator.of(context)
+                  .pushNamed('/planner', arguments: _mapSelectedSite);
+            },
+          ),
+          IconButton(
             tooltip: 'Compare Candidate Sites',
             icon: const Icon(Icons.compare_arrows_rounded),
             onPressed: () {
@@ -180,6 +217,7 @@ class _LunarSiteExplorerPageState extends State<LunarSiteExplorerPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      // Search Input Field
                       TextField(
                         key: const Key('lunar_site_search_field'),
                         controller: _searchController,
@@ -200,6 +238,8 @@ class _LunarSiteExplorerPageState extends State<LunarSiteExplorerPage> {
                         ),
                       ),
                       const SizedBox(height: AppConstants.space8),
+
+                      // Filter Chips Row
                       SingleChildScrollView(
                         scrollDirection: Axis.horizontal,
                         child: Row(
@@ -280,9 +320,67 @@ class _LunarSiteExplorerPageState extends State<LunarSiteExplorerPage> {
                           ],
                         ),
                       ),
+                      const SizedBox(height: AppConstants.space8),
+
+                      // Polar Map Interactive Banner Toggle
+                      ActionChip(
+                        avatar: Icon(
+                          _showPolarMap
+                              ? Icons.keyboard_arrow_up_rounded
+                              : Icons.radar_rounded,
+                          size: 18,
+                          color: theme.colorScheme.primary,
+                        ),
+                        label: Text(
+                          _showPolarMap ? 'Hide Polar Stereographic Map' : 'Explore Interactive 90°S Polar Map (Tap to view markers & craters)',
+                        ),
+                        backgroundColor: theme.colorScheme.primary.withValues(
+                          alpha: 0.1,
+                        ),
+                        side: BorderSide(
+                          color: theme.colorScheme.primary.withValues(
+                            alpha: 0.3,
+                          ),
+                        ),
+                        onPressed: () {
+                          setState(() {
+                            _showPolarMap = !_showPolarMap;
+                          });
+                        },
+                      ),
                     ],
                   ),
                 ),
+
+                // Optional Interactive Polar Map Canvas
+                if (_showPolarMap && !_isLoading)
+                  Padding(
+                    padding: EdgeInsets.symmetric(
+                      horizontal: isCompact
+                          ? AppConstants.space16
+                          : AppConstants.space24,
+                    ),
+                    child: LunarPolarMapWidget(
+                      sites: _filteredSites.isNotEmpty
+                          ? _filteredSites
+                          : _allSites,
+                      selectedSite: _mapSelectedSite,
+                      onSiteSelected: (site) {
+                        setState(() {
+                          _mapSelectedSite = site;
+                        });
+                      },
+                      onOpenDetails: _navigateToDetails,
+                      onOpenVisibility: (site) {
+                        Navigator.of(context)
+                            .pushNamed('/visibility', arguments: site);
+                      },
+                      onOpenPlanner: (site) {
+                        Navigator.of(context)
+                            .pushNamed('/planner', arguments: site);
+                      },
+                    ),
+                  ),
 
                 // Site Count Summary
                 Padding(
@@ -290,6 +388,7 @@ class _LunarSiteExplorerPageState extends State<LunarSiteExplorerPage> {
                     horizontal: isCompact
                         ? AppConstants.space16
                         : AppConstants.space24,
+                    vertical: AppConstants.space8,
                   ),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -309,9 +408,8 @@ class _LunarSiteExplorerPageState extends State<LunarSiteExplorerPage> {
                     ],
                   ),
                 ),
-                const SizedBox(height: AppConstants.space8),
 
-                // Body content
+                // Body content (Cards Grid / List)
                 Expanded(child: _buildBody(context, isCompact)),
               ],
             ),
@@ -362,22 +460,23 @@ class _LunarSiteExplorerPageState extends State<LunarSiteExplorerPage> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Icon(
-                Icons.travel_explore_outlined,
-                size: 56,
+                Icons.search_off_rounded,
+                size: 48,
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
               const SizedBox(height: AppConstants.space16),
               Text(
-                'No lunar sites match your query',
+                'No lunar sites match your criteria',
                 style: Theme.of(context).textTheme.titleMedium,
+                textAlign: TextAlign.center,
               ),
               const SizedBox(height: AppConstants.space8),
               Text(
-                'Try adjusting search keywords or clearing active classification filters.',
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                'Try adjusting your search terms or classification filters.',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
+                textAlign: TextAlign.center,
               ),
             ],
           ),

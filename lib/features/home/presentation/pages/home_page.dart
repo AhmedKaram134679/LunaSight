@@ -32,6 +32,7 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   late final List<SystemModule> _modules;
   bool _showRoadmap = false;
+  String _heroSelectedCode = 'Site04';
 
   @override
   void initState() {
@@ -107,10 +108,30 @@ class _HomePageState extends State<HomePage> {
                     context: context,
                     icon: Icons.travel_explore_rounded,
                     title: 'Lunar Site Explorer',
-                    subtitle: 'Search and filter 27 official NASA GSFC PGDA Product 78 south-pole candidate regions.',
+                    subtitle: 'Search and filter 27 official NASA GSFC PGDA Product 78 south-pole candidate regions with interactive polar radar map.',
                     badge: '27 SITES',
                     badgeColor: AppColors.statusInfo,
                     onTap: () => Navigator.of(context).pushNamed('/sites'),
+                  ),
+                  const SizedBox(height: AppConstants.space12),
+                  _buildActionCard(
+                    context: context,
+                    icon: Icons.wb_sunny_rounded,
+                    title: 'Solar & Earth Visibility',
+                    subtitle: 'Simulate topocentric solar elevation, grazing twilight, and direct-to-Earth communication link margin.',
+                    badge: 'CELESTIAL',
+                    badgeColor: const Color(0xFFF59E0B),
+                    onTap: () => Navigator.of(context).pushNamed('/visibility'),
+                  ),
+                  const SizedBox(height: AppConstants.space12),
+                  _buildActionCard(
+                    context: context,
+                    icon: Icons.access_time_rounded,
+                    title: 'Mission Time Planner',
+                    subtitle: 'Explore 14-day lunar day/night cycles, surface EVA daylight windows, and operational power budgets.',
+                    badge: 'TIMELINE',
+                    badgeColor: AppColors.darkPrimary,
+                    onTap: () => Navigator.of(context).pushNamed('/planner'),
                   ),
                   const SizedBox(height: AppConstants.space12),
                   _buildActionCard(
@@ -130,7 +151,7 @@ class _HomePageState extends State<HomePage> {
                     title: 'Register Custom Candidate Site',
                     subtitle: 'Input user-defined selenographic coordinates with strict datum and provenance validation.',
                     badge: 'CUSTOM',
-                    badgeColor: AppColors.darkPrimary,
+                    badgeColor: AppColors.darkSecondary,
                     onTap: () =>
                         Navigator.of(context).pushNamed('/sites/custom'),
                   ),
@@ -143,11 +164,42 @@ class _HomePageState extends State<HomePage> {
                           context: context,
                           icon: Icons.travel_explore_rounded,
                           title: 'Lunar Site Explorer',
-                          subtitle: 'Search and filter 27 official NASA GSFC PGDA Product 78 south-pole candidate regions.',
+                          subtitle: 'Search and filter 27 official NASA candidate regions with interactive polar radar map.',
                           badge: '27 SITES',
                           badgeColor: AppColors.statusInfo,
                           onTap: () =>
                               Navigator.of(context).pushNamed('/sites'),
+                        ),
+                      ),
+                      const SizedBox(width: AppConstants.space16),
+                      Expanded(
+                        child: _buildActionCard(
+                          context: context,
+                          icon: Icons.wb_sunny_rounded,
+                          title: 'Solar & Earth Visibility',
+                          subtitle: 'Simulate topocentric solar elevation, grazing twilight, and Earth direct communication.',
+                          badge: 'CELESTIAL',
+                          badgeColor: const Color(0xFFF59E0B),
+                          onTap: () =>
+                              Navigator.of(context).pushNamed('/visibility'),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: AppConstants.space16),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: _buildActionCard(
+                          context: context,
+                          icon: Icons.access_time_rounded,
+                          title: 'Mission Time Planner',
+                          subtitle: 'Explore 14-day synodic timelines, surface EVA daylight windows, and power budgets.',
+                          badge: 'TIMELINE',
+                          badgeColor: AppColors.darkPrimary,
+                          onTap: () =>
+                              Navigator.of(context).pushNamed('/planner'),
                         ),
                       ),
                       const SizedBox(width: AppConstants.space16),
@@ -169,9 +221,9 @@ class _HomePageState extends State<HomePage> {
                           context: context,
                           icon: Icons.add_location_alt_outlined,
                           title: 'Register Custom Site',
-                          subtitle: 'Input user-defined selenographic coordinates with strict datum and provenance validation.',
+                          subtitle: 'Input user-defined selenographic coordinates with strict datum validation.',
                           badge: 'CUSTOM',
-                          badgeColor: AppColors.darkPrimary,
+                          badgeColor: AppColors.darkSecondary,
                           onTap: () =>
                               Navigator.of(context).pushNamed('/sites/custom'),
                         ),
@@ -308,9 +360,162 @@ class _HomePageState extends State<HomePage> {
               ),
             ],
           ),
+          const SizedBox(height: AppConstants.space16),
+          // Active Landing Site Selector & Telemetry
+          Row(
+            children: [
+              Icon(
+                Icons.near_me_rounded,
+                size: 16,
+                color: theme.colorScheme.primary,
+              ),
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(
+                  'Active Landing Site:',
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: theme.colorScheme.onSurface,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppConstants.space8),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                _buildHeroSiteChip('Site04', 'Shackleton Rim (Site 04)'),
+                const SizedBox(width: AppConstants.space8),
+                _buildHeroSiteChip('Site01', 'Connecting Ridge (Site 01)'),
+                const SizedBox(width: AppConstants.space8),
+                _buildHeroSiteChip('Site07', 'Haworth Crater (Site 07)'),
+                const SizedBox(width: AppConstants.space8),
+                _buildHeroSiteChip('Site11', 'Amundsen Rim (Site 11)'),
+              ],
+            ),
+          ),
+          const SizedBox(height: AppConstants.space12),
+          // Dynamic Telemetry for the Selected Site
+          Container(
+            padding: const EdgeInsets.all(AppConstants.space12),
+            decoration: BoxDecoration(
+              color: isDark
+                  ? AppColors.darkBackground
+                  : const Color(0xFF0C1322),
+              borderRadius: BorderRadius.circular(AppConstants.radiusMedium),
+              border: Border.all(color: AppColors.darkBorder),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.wb_sunny_rounded,
+                      color: Color(0xFFF59E0B),
+                      size: 16,
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        _getHeroSiteSolarTelemetry(_heroSelectedCode),
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.white,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    const StatusBadge(
+                      label: 'DAYLIGHT',
+                      color: AppColors.statusSuccess,
+                      icon: Icons.check_circle_outline,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.public_rounded,
+                      color: AppColors.darkPrimary,
+                      size: 16,
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        _getHeroSiteEarthTelemetry(_heroSelectedCode),
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.white,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    const StatusBadge(
+                      label: 'LOS ACTIVE',
+                      color: AppColors.darkPrimary,
+                      icon: Icons.satellite_alt_rounded,
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: AppConstants.space12),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.tonalIcon(
+              onPressed: () {
+                final site = BundledLunarSiteCatalog.officialSites.firstWhere(
+                  (s) => s.siteCode == _heroSelectedCode,
+                  orElse: () => BundledLunarSiteCatalog.officialSites.first,
+                );
+                Navigator.of(context).pushNamed('/visibility', arguments: site);
+              },
+              icon: const Icon(Icons.wb_sunny_outlined, size: 16),
+              label: const Text('Analyze Visibility & Lighting'),
+            ),
+          ),
         ],
       ),
     );
+  }
+
+  Widget _buildHeroSiteChip(String code, String label) {
+    final isSelected = _heroSelectedCode == code;
+    return ChoiceChip(
+      label: Text(label),
+      selected: isSelected,
+      onSelected: (_) => setState(() => _heroSelectedCode = code),
+    );
+  }
+
+  String _getHeroSiteSolarTelemetry(String code) {
+    return switch (code) {
+      'Site04' => 'Sun Elevation: +1.42° • Direct Sunlight (88.5% flux)',
+      'Site01' => 'Sun Elevation: +1.15° • Direct Sunlight (84.1% flux)',
+      'Site07' => 'Sun Elevation: -0.38° • Grazing Shadow / Penumbra',
+      'Site11' => 'Sun Elevation: +1.86° • Direct Sunlight (91.0% flux)',
+      _ => 'Sun Elevation: +1.20° • Direct Sunlight',
+    };
+  }
+
+  String _getHeroSiteEarthTelemetry(String code) {
+    return switch (code) {
+      'Site04' => 'Earth Elevation: +5.18° • Clear LOS (+16.1 dB margin)',
+      'Site01' => 'Earth Elevation: +4.62° • Clear LOS (+15.4 dB margin)',
+      'Site07' => 'Earth Elevation: +2.10° • Marginal Grazing LOS (+10.5 dB)',
+      'Site11' => 'Earth Elevation: +6.38° • Clear LOS (+17.2 dB margin)',
+      _ => 'Earth Elevation: +4.50° • Clear Line of Sight',
+    };
   }
 
   Widget _buildTelemetryChip(
@@ -515,10 +720,12 @@ class _HomePageState extends State<HomePage> {
                 size: 22,
               ),
               const SizedBox(width: AppConstants.space8),
-              Text(
-                'Scientific Capabilities & Engine Status',
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
+              Expanded(
+                child: Text(
+                  'Scientific Capabilities & Engine Status',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ),
             ],
@@ -636,21 +843,26 @@ class _HomePageState extends State<HomePage> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Row(
-                  children: [
-                    Icon(
-                      Icons.account_tree_outlined,
-                      color: theme.colorScheme.primary,
-                      size: 20,
-                    ),
-                    const SizedBox(width: AppConstants.space8),
-                    Text(
-                      'Engineering Roadmap (${_modules.length} Modules)',
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.bold,
+                Expanded(
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.account_tree_outlined,
+                        color: theme.colorScheme.primary,
+                        size: 20,
                       ),
-                    ),
-                  ],
+                      const SizedBox(width: AppConstants.space8),
+                      Flexible(
+                        child: Text(
+                          'Engineering Roadmap (${_modules.length} Modules)',
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
                 Icon(
                   _showRoadmap
