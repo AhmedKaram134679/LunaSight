@@ -4,7 +4,7 @@
 **Project:** LunaSight  
 **Repository:** `AhmedKaram134679/LunaSight`  
 **Current Branch:** `main`  
-**Baseline Commit:** `5c85388232fa8361a63e6cacbb8d3e7e1ad08636`
+**Baseline Commit:** `5800b68c16a3ccdbdc4520bd5dff6564a40515d0`
 **Audit Type:** Native Reference Execution & Numerical Verification
 **Final Status:** **PASS**
 
@@ -32,7 +32,7 @@ This targeted audit resolved critical methodological and documentation requireme
 ## 2. Baseline Status
 
 - **Repository Branch:** `main`
-- **Current HEAD Commit:** `5c85388232fa8361a63e6cacbb8d3e7e1ad08636`
+- **Current HEAD Commit:** `5800b68c16a3ccdbdc4520bd5dff6564a40515d0`
 - **Initial Working Tree:** Clean baseline.
 - **Audited Production Files:**
   - `lib/features/solar_earth_visibility/domain/models/astronomical_time.dart` (Unmodified)
@@ -97,7 +97,9 @@ To prevent roundoff accumulation and guarantee exact sample counts:
    $$(day\_offset, hour\_of\_day) = \text{divmod}(H, 24)$$
    $$date_1 = 2451545.0$$
    $$date_2 = \text{float}(day\_offset) + \frac{hour\_of\_day}{24.0}$$
-   This derivation eliminates cumulative floating-point addition error ($+= 1/24\text{ d}$) and preserves full precision across millions of samples.
+   This derivation eliminates cumulative floating-point addition error ($+= 1/24\text{ d}$) and ensures strictly reproducible evaluation.
+4. **Critical Numerical Distinction (Integer Indexing vs. Binary Floating-Point Limits):**
+   An integer hour index guarantees exact sample indexing, deterministic endpoint counts, and strictly zero cumulative stepping drift ($\sum \Delta t$). However, it does *not* make the final binary floating-point Julian Date representation mathematically exact, because fractions such as $1/24$ (and other hour fractions) have non-terminating binary representations in IEEE-754 double precision ($2^{-53}$ precision limits). Deriving $date_2$ per-sample directly from $H$ ensures that every sample is independently and identically evaluated without step-to-step error propagation across millions of iterations.
 
 ### 4.3 Validation Scope: Mathematical Model vs. Production Dart Runtime
 It is essential to distinguish the validation scope:
@@ -113,17 +115,42 @@ A prior test in `astronomical_time_test.dart` was titled:
 `Verifies round-trip TT -> TDB -> TT fixed-point consistency to sub-nanosecond precision`
 and asserted that `tTTReconstructed.differenceInSeconds(tTT).abs() < 1e-9`.
 
-An independent numerical analysis revealed the following:
-1. **Algebraic Inversion Bound vs. Astronomical Accuracy:**
-   The forward conversion adds $\Delta t = \delta(T_{\text{TT}})$ to `secondOfDay`, and the inverse conversion subtracts $\delta(T_{\text{TDB}})$. The difference between $\delta(T_{\text{TT}})$ and $\delta(T_{\text{TDB}})$ is governed by the derivative:
-   $$\left|\delta(T_{\text{TDB}}) - \delta(T_{\text{TT}})\right| \approx \left|\frac{d\delta}{dt}\right| |\Delta t| \le 1.2 \times 10^{-9} \times 0.0017\text{ s} \approx 2.04 \times 10^{-12}\text{ s}$$
-   While the algebraic functions invert each other to picosecond precision, this is **internal algebraic reversibility**, NOT astronomical accuracy against solar system ephemerides (which exhibits up to $\sim 40\ \mu\text{s}$ residuals). Calling this "sub-nanosecond precision" misleadingly implies that LunaSight's TDB conversion has sub-nanosecond physical accuracy.
-2. **IEEE-754 Representation Limits:**
-   In double-precision floating point, standard Julian Dates ($\approx 2.45 \times 10^6\text{ days}$) have an epsilon of $2.45 \times 10^6 \times 2^{-52} \approx 5.4 \times 10^{-10}\text{ days} \approx 47\ \mu\text{s}$. A single large Julian Date float cannot resolve nanoseconds at all. `AstronomicalTime`'s split representation (`jdBase` + `secondOfDay`) avoids this cancellation, but `AstronomicalTime.representsSameInstant()` defaults to microsecond resolution ($1\ \mu\text{s} = 10^{-6}\text{ s}$).
-3. **Corrective Action Taken:**
-   The test was renamed to:
-   `Verifies algebraic round-trip consistency of TT <-> TDB conversion pair`
-   The test assertion was relaxed to a defensible, meaningful tolerance ($< 1\ \mu\text{s}$), with explicit comments explaining that the test verifies algebraic self-consistency rather than sub-nanosecond physical accuracy.
+This assertion and claim were critically audited. To maintain rigorous scientific standards, four fundamentally distinct concepts must never be conflated:
+
+1. **Numerical Representation Precision:**
+   - In double-precision floating point (IEEE-754), standard Julian Dates ($\approx 2.45 \times 10^6\text{ days}$) have a machine epsilon of $2.45 \times 10^6 \times 2^{-52} \approx 5.4 \times 10^{-10}\text{ days} \approx 47\ \mu\text{s}$. A single large Julian Date float cannot resolve nanoseconds, or even microseconds.
+   - `AstronomicalTime` solves this by a split representation: `jdBase` (civil day baseline) and `secondOfDay` ($[0.0, 86400.0)$). In `secondOfDay`, floating-point epsilon near $86,400\text{ s}$ is $2^{16} \times 2^{-52} \approx 1.455 \times 10^{-11}\text{ s}$ ($\sim 14.5\text{ picoseconds}$).
+   - However, external interfaces (such as standard civil `DateTime`) only support microsecond resolution ($1\ \mu\text{s} = 10^{-6}\text{ s}$), and `AstronomicalTime.representsSameInstant()` defaults to a tolerance of $1\ \mu\text{s}$.
+
+2. **Algebraic Round-Trip Consistency:**
+   - Evaluates whether chaining the forward mapping $T_{\text{TT}} \to T_{\text{TDB}}$ and inverse mapping $T_{\text{TDB}} \to T_{\text{TT}}$ returns the starting epoch.
+   - Forward: $\text{secondOfDay}_{\text{TDB}} = \text{secondOfDay}_{\text{TT}} + \delta(T_{\text{TT}})$.
+   - Inverse: $\text{secondOfDay}_{\text{TT reconstructed}} = \text{secondOfDay}_{\text{TDB}} - \delta(T_{\text{TDB}})$.
+   - This measures purely the self-consistency and algebraic reversibility of the transformation pair within `AstronomicalTime`.
+
+3. **Mathematical Inversion Error:**
+   - Because the inverse function evaluates $\delta$ at $T_{\text{TDB}}$ instead of $T_{\text{TT}}$, the analytical difference between $\delta(T_{\text{TT}})$ and $\delta(T_{\text{TDB}})$ is bounded by the mean-value theorem:
+     $$\left|\delta(T_{\text{TDB}}) - \delta(T_{\text{TT}})\right| \le \left|\frac{d\delta}{dt}\right| |\Delta t|$$
+     With $|\Delta t| \le 0.0017\text{ s}$ and $|d\delta/dt| \le 1.2 \times 10^{-9}\text{ s/s}$, the theoretical inversion error is:
+     $$|\Delta t| \times 1.2 \times 10^{-9} \le 0.0017 \times 1.2 \times 10^{-9} \approx 2.04 \times 10^{-12}\text{ s} \approx 2\text{ picoseconds}$$
+   - When combined with IEEE-754 subtraction precision in `secondOfDay` ($\approx 14.5\text{ ps}$), the mathematical inversion error is on the order of picoseconds.
+
+4. **Physical Astronomical Accuracy Against an External Ephemeris:**
+   - Evaluates the difference between LunaSight's compact single-harmonic Keplerian approximation and the full IAU SOFA / ERFA 787-term series (or JPL DE421 / DE440 ephemerides).
+   - Unmodeled planetary perturbation terms (Jupiter, Saturn) cause physical ephemeris residuals up to $\mathbf{37.74\ \mu\text{s}}$ (1950–2050) and $\mathbf{40.01\ \mu\text{s}}$ (1900–2100).
+   - Calling an algebraic round-trip test "sub-nanosecond precision" misleadingly conflated internal formula invertibility with physical astronomical accuracy.
+
+### 5.2 Corrective Action & Final Tolerance Justification
+- **Test Renaming:** The test was renamed to:
+  `Verifies algebraic round-trip consistency of TT <-> TDB conversion pair`
+- **Tolerance Justification:**
+  * Setting a sub-nanosecond tolerance ($< 1\text{ ns}$) is physically misleading and unrepresentative of the system's external interfaces.
+  * Setting a tolerance of $< 1\ \mu\text{s}$ ($10^{-6}\text{ s}$) in `astronomical_time_test.dart` directly aligns with:
+    1. The contract of `AstronomicalTime.representsSameInstant()`, whose default comparison tolerance is $1\ \mu\text{s}$.
+    2. The standard resolution limit of civil `DateTime` representations in Flutter/Dart ($1\ \mu\text{s}$).
+    3. Defensible algebraic verification that detects any unit regression, sign errors, or bad offsets without making unfounded physical accuracy claims.
+  * The test explicitly verifies both the numeric difference (`< 1e-6 s`) and physical instant equivalence (`representsSameInstant(...) == true`).
+  * No production conversion algorithms were modified.
 
 ---
 
