@@ -2,9 +2,17 @@
 """
 benchmark_tdb.py
 
-Independent scientific benchmarking of LunaSight's production TDB-TT approximation
-against direct execution of the actual compiled IAU SOFA / ERFA eraDtdb() C function
+Independent scientific benchmarking of LunaSight's compact analytical TDB-TT mathematical
+model against direct execution of the actual compiled IAU SOFA / ERFA eraDtdb() C function
 (Fairhead & Bretagnon 1990 series).
+
+IMPORTANT VALIDATION SCOPE:
+This benchmark evaluates LunaSight's compact analytical mathematical model
+against the compiled canonical IAU SOFA / ERFA C library reference.
+It is an independent mathematical-model verification and does NOT directly execute
+or benchmark the production Dart execution path. Dart production classes
+(AstronomicalTime, LocalTopocentricConverter) are independently tested in the
+Flutter/Dart test suite (test/features/solar_earth_visibility/).
 
 Reference Execution Architecture:
 1. Pinned Reference C Source & Headers:
@@ -23,7 +31,7 @@ Reference Execution Architecture:
    - Deliberately refuses to fall back to any Python reimplementation if compilation fails.
    - Cleans up all temporary binaries, object files, and export libraries upon exit.
 
-Scientific Time-Scale Methodology:
+Scientific Time-Scale & Time-Grid Methodology:
 1. Official ERFA Convention:
    The official ERFA dtdb.c documentation states (Note 1):
      "Although the date is, formally, barycentric dynamical time (TDB),
@@ -31,14 +39,18 @@ Scientific Time-Scale Methodology:
       effect on the accuracy of the prediction."
    This benchmark evaluates every sample on an explicit, uniform TT timeline and passes
    the TT epoch directly to eraDtdb() as documented.
-2. Two-Part Precision-Preserving Julian Date:
-   Each epoch is represented using the J2000 split:
-     * date1 = 2451545.0 (J2000.0)
-     * date2 = days_from_J2000_TT
-   Avoiding subtraction cancellation and preserving full sub-nanosecond precision.
+2. Deterministic Integer-Based Hourly Time-Grid:
+   - Anchored at J2000.0 (2000-01-01 12:00:00 TT, JD 2451545.0 TT).
+   - Time steps are indexed by exact integer hours: H = H_start + k, for k in 0 .. N-1.
+   - Number of samples is derived via integer arithmetic: N = H_end - H_start + 1 (inclusive).
+   - Avoids cumulative floating-point addition of 1/24 days.
+   - Each sample's two-part Julian Date is derived via integer division and modulo:
+       day_offset, hour_of_day = divmod(H, 24)
+       date1 = 2451545.0
+       date2 = float(day_offset) + hour_of_day / 24.0
 3. LunaSight Compact Formula:
-   Evaluated with the identical days_from_J2000_TT offset:
-     * T_TT = days_from_J2000_TT / 36525.0
+   Evaluated with the identical date2 (days from J2000_TT) offset:
+     * T_TT = date2 / 36525.0
      * g = (357.53 + 35999.05 * T_TT) * (pi / 180.0)
      * delta_proj = 0.001657 * sin(g + 0.0167 * sin(g))
 4. Residual Convention:
@@ -308,9 +320,13 @@ def run_self_tests(builder: NativeErfaBuilder) -> bool:
     return True
 
 
-def jd_to_tt_calendar(days_from_j2000: float) -> str:
-    """Converts a J2000-offset Julian Date on the TT scale to a standard calendar string."""
-    jd = 2451545.0 + days_from_j2000
+def hour_offset_to_calendar(h: int) -> str:
+    """
+    Converts an exact integer hour offset from J2000.0 TT (JD 2451545.0 TT)
+    to a Gregorian calendar string YYYY-MM-DD HH:00:00.0 TT.
+    """
+    day_offset, hour = divmod(h, 24)
+    jd = 2451545.0 + day_offset + hour / 24.0
     z = math.floor(jd + 0.5)
     f = (jd + 0.5) - z
     if z < 2299161:
@@ -325,53 +341,58 @@ def jd_to_tt_calendar(days_from_j2000: float) -> str:
     day = b - d - math.floor(30.6001 * e)
     month = e - 1 if e < 14 else e - 13
     year = c - 4716 if month > 2 else c - 4715
-    hour = f * 24.0
-    h = math.floor(hour)
-    minute = (hour - h) * 60.0
-    m = math.floor(minute)
-    s = (minute - m) * 60.0
-    if round(s, 1) >= 60.0:
-        s = 0.0
-        m += 1
-        if m >= 60:
-            m = 0
-            h += 1
-            if h >= 24:
-                h = 0
-                day += 1
-    return f"{year:04d}-{month:02d}-{day:02d} {h:02d}:{m:02d}:{s:04.1f} TT"
+    tot_sec = round(f * 86400.0)
+    hh = (tot_sec // 3600) % 24
+    mm = (tot_sec % 3600) // 60
+    ss = tot_sec % 60
+    return f"{year:04d}-{month:02d}-{day:02d} {hh:02d}:{mm:02d}:{ss:02d}.0 TT"
 
 
-def run_benchmark_range(name: str, eraDtdb, start_jd: float, end_jd: float, step_days: float):
-    """Executes full hourly sampling of production compact formula against native compiled eraDtdb()."""
+def run_benchmark_range(name: str, eraDtdb, start_hour: int, end_hour: int):
+    """
+    Executes full hourly sampling of LunaSight's compact Keplerian approximation
+    against the compiled native IAU SOFA / ERFA eraDtdb() C function.
+
+    Time Grid Generation:
+    - start_hour, end_hour: exact integer hour offsets relative to J2000.0 (JD 2451545.0 TT).
+    - Inclusive endpoint convention: evaluates all integer hours from start_hour through end_hour.
+    - Exact sample count: N = end_hour - start_hour + 1 (pure integer arithmetic).
+    - Per-sample date2: day_offset, hour_of_day = divmod(start_hour + k, 24); date2 = day_offset + hour_of_day / 24.0.
+    - Guarantees exact 1-hour steps (3600 s TT) with zero cumulative floating-point drift.
+    """
     date1 = 2451545.0  # J2000.0 split
-    d_start = start_jd - date1
-    d_end = end_jd - date1
-    N = int(round((d_end - d_start) / step_days)) + 1
+    N = end_hour - start_hour + 1
+
+    start_cal = hour_offset_to_calendar(start_hour)
+    end_cal = hour_offset_to_calendar(end_hour)
+    start_jd = date1 + start_hour / 24.0
+    end_jd = date1 + end_hour / 24.0
 
     print(f"\nExecuting Benchmark: {name}")
-    print(f"  Sample Count:      {N:,} samples")
-    print(f"  Step Size:         {step_days * 86400.0:.0f} s (1 hour)")
-    print(f"  Start Epoch (TT):  {jd_to_tt_calendar(d_start)} (JD {start_jd:.4f} TT)")
-    print(f"  End Epoch (TT):    {jd_to_tt_calendar(d_end)} (JD {end_jd:.4f} TT)")
+    print(f"  Sample Count:      {N:,} samples (Integer-based: {end_hour} - {start_hour} + 1)")
+    print(f"  Step Size:         3600 s TT (1 hour exact, zero accumulation error)")
+    print(f"  Start Epoch (TT):  {start_cal} (JD {start_jd:.4f} TT, H={start_hour})")
+    print(f"  End Epoch (TT):    {end_cal} (JD {end_jd:.4f} TT, H={end_hour})")
 
     pi_over_180 = math.pi / 180.0
     max_abs = 0.0
-    max_idx = 0
+    max_h = start_hour
     sum_sq = 0.0
     sum_signed = 0.0
     min_signed = float("inf")
     max_signed = float("-inf")
 
     t0 = time.time()
-    for i in range(N):
-        d2 = d_start + i * step_days
+    for k in range(N):
+        h = start_hour + k
+        day_offset, hour_of_day = divmod(h, 24)
+        date2 = float(day_offset) + hour_of_day / 24.0
 
         # Call the actual native C function:
-        ref = eraDtdb(date1, d2, 0.0, 0.0, 0.0, 0.0)
+        ref = eraDtdb(date1, date2, 0.0, 0.0, 0.0, 0.0)
 
         # LunaSight production compact formula (evaluated from J2000 offset):
-        t_centuries = d2 / 36525.0
+        t_centuries = date2 / 36525.0
         g = (357.53 + 35999.05 * t_centuries) * pi_over_180
         proj = 0.001657 * math.sin(g + 0.0167 * math.sin(g))
 
@@ -386,14 +407,13 @@ def run_benchmark_range(name: str, eraDtdb, start_jd: float, end_jd: float, step
         abs_res = abs(res_us)
         if abs_res > max_abs:
             max_abs = abs_res
-            max_idx = i
+            max_h = h
 
     dt = time.time() - t0
     mean_signed = sum_signed / N
     rms = math.sqrt(sum_sq / N)
-    peak_d2 = d_start + max_idx * step_days
-    peak_jd = date1 + peak_d2
-    peak_cal = jd_to_tt_calendar(peak_d2)
+    peak_cal = hour_offset_to_calendar(max_h)
+    peak_jd = date1 + max_h / 24.0
 
     print(f"  Completed in:      {dt:.2f} s ({N/dt:.0f} samples/s)")
     print(f"  RMS Residual:      {rms:.4f} us")
@@ -401,7 +421,7 @@ def run_benchmark_range(name: str, eraDtdb, start_jd: float, end_jd: float, step
     print(f"  Min Signed:        {min_signed:.4f} us")
     print(f"  Max Signed:        {max_signed:.4f} us")
     print(f"  Max Absolute:      {max_abs:.4f} us")
-    print(f"  Peak Epoch:        {peak_cal} (JD {peak_jd:.4f} TT)")
+    print(f"  Peak Epoch:        {peak_cal} (JD {peak_jd:.4f} TT, H={max_h})")
 
     return {
         "name": name,
@@ -414,6 +434,7 @@ def run_benchmark_range(name: str, eraDtdb, start_jd: float, end_jd: float, step
         "max_abs_us": max_abs,
         "peak_epoch": peak_cal,
         "peak_jd": peak_jd,
+        "peak_h": max_h,
     }
 
 
@@ -463,26 +484,26 @@ def main():
     with builder.compiled_library() as eraDtdb:
         evaluate_reference_epochs(eraDtdb)
 
-        # Range A: 1950-01-01 00:00:00 TT to 2050-12-31 23:00:00 TT
-        # 1950-01-01 00:00:00 TT = JD 2433282.5
-        # 2050-12-31 23:00:00 TT = JD 2470172.4583333335
+        # Range A: 1950-01-01 00:00:00 TT to 2050-12-31 23:00:00 TT (inclusive)
+        # 1950-01-01 00:00:00 TT is -438,300 integer hours from J2000.0 (JD 2433282.5 TT)
+        # 2050-12-31 23:00:00 TT is +447,059 integer hours from J2000.0 (JD 2470172.4583 TT)
+        # Sample count N = 447059 - (-438300) + 1 = 885,360 samples
         run_benchmark_range(
-            "Range A: 1950–2050 (Hourly)",
+            "Range A: 1950–2050 (Hourly, Integer Grid)",
             eraDtdb,
-            start_jd=2433282.5,
-            end_jd=2470172.4583333335,
-            step_days=1.0 / 24.0,
+            start_hour=-438300,
+            end_hour=447059,
         )
 
-        # Range B: 1900-01-01 00:00:00 TT to 2100-12-31 23:00:00 TT
-        # 1900-01-01 00:00:00 TT = JD 2415020.5
-        # 2100-12-31 23:00:00 TT = JD 2488434.4583333335
+        # Range B: 1900-01-01 00:00:00 TT to 2100-12-31 23:00:00 TT (inclusive)
+        # 1900-01-01 00:00:00 TT is -876,588 integer hours from J2000.0 (JD 2415020.5 TT)
+        # 2100-12-31 23:00:00 TT is +885,347 integer hours from J2000.0 (JD 2488434.4583 TT)
+        # Sample count N = 885347 - (-876588) + 1 = 1,761,936 samples
         run_benchmark_range(
-            "Range B: 1900–2100 (Hourly)",
+            "Range B: 1900–2100 (Hourly, Integer Grid)",
             eraDtdb,
-            start_jd=2415020.5,
-            end_jd=2488434.4583333335,
-            step_days=1.0 / 24.0,
+            start_hour=-876588,
+            end_hour=885347,
         )
 
     return 0

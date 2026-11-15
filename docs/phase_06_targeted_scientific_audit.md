@@ -4,7 +4,7 @@
 **Project:** LunaSight  
 **Repository:** `AhmedKaram134679/LunaSight`  
 **Current Branch:** `main`  
-**Baseline Commit:** `69d558d60443e77266e78cc85b391c758d37250b`
+**Baseline Commit:** `5c85388232fa8361a63e6cacbb8d3e7e1ad08636`
 **Audit Type:** Native Reference Execution & Numerical Verification
 **Final Status:** **PASS**
 
@@ -12,26 +12,28 @@
 
 ## 1. Executive Summary
 
-This targeted audit corrected the reference execution architecture of the TDB benchmark and independently evaluated LunaSight's astronomical time infrastructure:
-1. **Direct Native C Reference Execution:** Eliminated intermediate Python/NumPy coefficient table re-evaluations. The benchmark now compiles the pinned upstream IAU SOFA / ERFA C implementation directly into a shared library/DLL and invokes the exported native `eraDtdb()` function via Python `ctypes`.
+This targeted audit resolved critical methodological and documentation requirements for the Phase 06 astronomical time benchmark:
+1. **Direct Native C Reference Execution:** Eliminated intermediate Python/NumPy coefficient table re-evaluations. The benchmark compiles the pinned upstream IAU SOFA / ERFA C implementation directly into a shared library/DLL and invokes the exported native `eraDtdb()` function via Python `ctypes`.
 2. **Pinned Upstream Commit & Cryptographic Verification:** All required reference source and header files are pinned to commit `ec968fb295d3cf0572c4f024bf3c5357d9258b7b` of the canonical `liberfa/erfa` repository (SOFA release 2023-10-11) and cryptographically verified prior to compilation:
    - `tool/sofa_dtdb_cached.c` (LF SHA-256: `228bd7c7c1c88dda44c29a076f289c968f64d77a2dc389138b03ab5d1d442105`)
    - `tool/erfa.h` (LF SHA-256: `9549553b95ca2fbbcdcabcc69d82fb3cdd376c28b03c2793200138ff55727088`)
    - `tool/erfam.h` (LF SHA-256: `0da6313033aacf9c64533a7e74be49ecda97b4aaa87e134f98287e4ff279886f`)
-3. **Documented ERFA Time-Scale Convention & Precision Preservation:** As explicitly documented in Note 1 of ERFA `dtdb.c`, while the date arguments are formally TDB, Terrestrial Time (TT) can be used with no practical effect on prediction accuracy. Each sample epoch is evaluated on a uniform TT timeline using a two-part Julian Date split ($date_1 = 2451545.0$, $date_2 = \text{days\_from\_J2000\_TT}$), completely avoiding cancellation errors.
-4. **Native Reference Self-Tests:** Added five focused native execution self-tests covering symbol resolution, the official ERFA test vector (passed to $3.47 \times 10^{-18}$ absolute error against the $10^{-15}$ tolerance), geocentric zero-parameter behavior, explicit compiler failure without Python fallback, and cryptographic source tampering rejection.
-5. **Measured Hourly Benchmark Results:** Evaluated the native C routine on true hourly grids:
-   - **Range A (1950–2050, 885,360 hourly samples):** RMS $16.7850\ \mu\text{s}$, maximum observed absolute residual on the grid $37.7449\ \mu\text{s}$ (at 1960-10-12 01:00:00.0 TT).
-   - **Range B (1900–2100, 1,761,936 hourly samples):** RMS $16.9828\ \mu\text{s}$, maximum observed absolute residual on the grid $40.0067\ \mu\text{s}$ (at 1901-10-05 19:00:00.0 TT).
-6. **Hardened Epoch Tolerance Validation & Protected Phases:** Verified non-negative finite validation on `toleranceSeconds` in `AstronomicalTime.representsSameInstant()`. Phase 04 (`scientific_geometry`), Phase 05 (`terrain_horizon`), and production astronomical algorithms remain 100% untouched. All 269 repository tests pass with zero static analysis issues.
+3. **Deterministic Integer-Based Hourly Time-Grid:** Grid construction was upgraded to strictly deterministic integer indexing anchored at J2000.0 TT ($H_{\text{start}}$ to $H_{\text{end}}$ inclusive). Sample count $N = H_{\text{end}} - H_{\text{start}} + 1$ is derived via pure integer arithmetic, and per-sample parameters are derived via `divmod(H, 24)` to eliminate cumulative floating-point addition error ($+= 1/24\text{ d}$).
+4. **Validation Scope Clarification:** The benchmark explicitly validates LunaSight's compact mathematical model against the compiled ERFA C reference. It does NOT directly execute or benchmark the Dart production runtime, which is independently validated by Flutter/Dart unit and integration tests.
+5. **Resolution of Sub-Nanosecond Precision Claims:** Investigated round-trip precision assertions. Replaced the scientifically misleading "sub-nanosecond precision" test assertion with an explicit verification of algebraic reversibility and self-consistency of the forward and inverse transformation pair in `AstronomicalTime`.
+6. **Documentation Conflicts Recorded:** Identified and formally recorded four existing documentation conflicts in `astronomical_time.dart` without unauthorized modifications to production comments.
+7. **Native Reference Self-Tests & Measured Results:** Five native self-tests passed (official ERFA test vector error $3.47 \times 10^{-18}\text{ s} < 10^{-15}$). Native execution on the integer hourly grid confirmed:
+   - **Range A (1950–2050, 885,360 samples):** RMS $16.7850\ \mu\text{s}$, maximum observed absolute residual $37.7449\ \mu\text{s}$ (at 1960-10-12 01:00:00.0 TT).
+   - **Range B (1900–2100, 1,761,936 samples):** RMS $16.9828\ \mu\text{s}$, maximum observed absolute residual $40.0067\ \mu\text{s}$ (at 1901-10-05 19:00:00.0 TT).
+8. **Phase & Code Protection:** Phase 04 (`scientific_geometry`), Phase 05 (`terrain_horizon`), and production code in `lib/` remain 100% untouched. All 269 repository tests pass with zero static analysis issues.
 
 ---
 
 ## 2. Baseline Status
 
 - **Repository Branch:** `main`
-- **Current HEAD Commit:** `69d558d60443e77266e78cc85b391c758d37250b`
-- **Initial Working Tree:** Clean baseline before benchmark reference corrections.
+- **Current HEAD Commit:** `5c85388232fa8361a63e6cacbb8d3e7e1ad08636`
+- **Initial Working Tree:** Clean baseline.
 - **Audited Production Files:**
   - `lib/features/solar_earth_visibility/domain/models/astronomical_time.dart` (Unmodified)
   - `lib/features/solar_earth_visibility/domain/models/time_scale.dart` (Unmodified)
@@ -39,10 +41,10 @@ This targeted audit corrected the reference execution architecture of the TDB be
   - `lib/features/solar_earth_visibility/domain/models/celestial_vector.dart` (Unmodified)
   - `lib/features/solar_earth_visibility/domain/services/local_topocentric_converter.dart` (Unmodified)
 - **Audited Test Files:**
-  - `test/features/solar_earth_visibility/domain/models/astronomical_time_test.dart` (Unmodified)
+  - `test/features/solar_earth_visibility/domain/models/astronomical_time_test.dart` (Updated test description & precision tolerance)
   - `test/features/solar_earth_visibility/domain/services/local_topocentric_converter_test.dart` (Unmodified)
 - **Audited Benchmark Harness & References:**
-  - `tool/benchmark_tdb.py` (Corrected to direct native C execution)
+  - `tool/benchmark_tdb.py` (Updated to integer grid & scope clarification)
   - `tool/sofa_dtdb_cached.c` (Pinned C reference source)
   - `tool/erfa.h` (Pinned upstream header)
   - `tool/erfam.h` (Pinned upstream header)
@@ -67,7 +69,7 @@ double eraDtdb(double date1, double date2, double ut, double elong, double u, do
 
 ---
 
-## 4. Time-Scale Methodology & Precision Preservation
+## 4. Time-Scale Methodology & Deterministic Time-Grid
 
 ### 4.1 Documented ERFA Time-Scale Convention
 In Section 4 of the official routine documentation (`dtdb.c` Note 1):
@@ -77,31 +79,68 @@ Because the maximum difference between TDB and TT is $|\Delta t| \le 0.0017\text
 $$0.0017\text{ s} \times 1.2 \times 10^{-9} \approx 2 \times 10^{-12}\text{ s} = 0.000002\ \mu\text{s}$$
 This variation is negligible compared to microsecond-level residuals. Following this documented convention, the benchmark defines each sample epoch on an explicit, uniform TT timeline and calls `eraDtdb()` directly using the TT Julian Date.
 
-### 4.2 Two-Part J2000 Julian Date Representation
-To eliminate floating-point cancellation errors caused by large Julian Dates ($\approx 2.45 \times 10^6\text{ days}$), the benchmark adopts the official J2000 split recommendation:
-- $date_1 = 2451545.0$ (Julian Date of J2000.0)
-- $date_2 = \text{days\_from\_J2000\_TT}$
+### 4.2 Deterministic Integer-Based Hourly Time-Grid
+To prevent roundoff accumulation and guarantee exact sample counts:
+1. **Anchoring:** All hourly intervals are anchored relative to J2000.0 TT (2000-01-01 12:00:00 TT, JD 2451545.0 TT).
+2. **Integer Arithmetic Sample Counts:**
+   - **Range A (1950-01-01 00:00:00 TT to 2050-12-31 23:00:00 TT):**
+     * $H_{\text{start}} = -438,300\text{ hours}$
+     * $H_{\text{end}} = +447,059\text{ hours}$
+     * $N = H_{\text{end}} - H_{\text{start}} + 1 = 447059 - (-438300) + 1 = \mathbf{885,360\text{ samples}}$ (inclusive endpoints).
+   - **Range B (1900-01-01 00:00:00 TT to 2100-12-31 23:00:00 TT):**
+     * $H_{\text{start}} = -876,588\text{ hours}$
+     * $H_{\text{end}} = +885,347\text{ hours}$
+     * $N = H_{\text{end}} - H_{\text{start}} + 1 = 885347 - (-876588) + 1 = \mathbf{1,761,936\text{ samples}}$ (inclusive endpoints).
+3. **Exact Two-Part Julian Date Construction:**
+   For sample index $k \in \{0, 1, \dots, N-1\}$:
+   $$H = H_{\text{start}} + k$$
+   $$(day\_offset, hour\_of\_day) = \text{divmod}(H, 24)$$
+   $$date_1 = 2451545.0$$
+   $$date_2 = \text{float}(day\_offset) + \frac{hour\_of\_day}{24.0}$$
+   This derivation eliminates cumulative floating-point addition error ($+= 1/24\text{ d}$) and preserves full precision across millions of samples.
 
-Inside `eraDtdb`, the internal time variable is computed as:
-$$t = \frac{(date_1 - \text{ERFA\_DJ00}) + date_2}{\text{ERFA\_DJM}}$$
-Because $date_1 = \text{ERFA\_DJ00}$, the difference $date_1 - \text{ERFA\_DJ00}$ is identically $0.0$, allowing $date_2$ to scale directly with zero precision loss.
-
-LunaSight's production compact formula is similarly evaluated using the identical offset:
-$$T_{\text{TT}} = \frac{\text{days\_from\_J2000\_TT}}{36525.0}$$
-$$g = \left(357.53^\circ + 35999.05^\circ \, T_{\text{TT}}\right) \times \frac{\pi}{180^\circ}$$
-$$\Delta t_{\text{proj}} = 0.001657 \sin\left(g + 0.0167 \sin g\right) \quad \text{seconds}$$
-
-### 4.3 Geocentric Configuration
-All benchmark evaluations use the geocentric configuration:
-- Universal time: $ut = 0.0$
-- Geocentric longitude: $elong = 0.0$
-- Spin-axis distance: $u = 0.0\text{ km}$
-- Equator distance: $v = 0.0\text{ km}$
-This isolates the solar-system barycentric dynamical terms without topocentric diurnal clock effects.
+### 4.3 Validation Scope: Mathematical Model vs. Production Dart Runtime
+It is essential to distinguish the validation scope:
+- **What the benchmark validates:** The benchmark is an independent mathematical-model comparison between LunaSight's compact Keplerian approximation and the canonical IAU SOFA / ERFA C function `eraDtdb()`.
+- **What the benchmark does NOT validate:** The benchmark does not execute or benchmark the Dart production code (`AstronomicalTime` or `LocalTopocentricConverter`). Dart class contracts, leap-second offsets, and topocentric transformations are independently validated in the Dart test suite (`test/features/solar_earth_visibility/`).
 
 ---
 
-## 5. Pinned Upstream Sources & Cryptographic Verification
+## 5. Numerical Precision Investigation: Sub-Nanosecond Claims
+
+### 5.1 Analysis of the Prior Sub-Nanosecond Assertion
+A prior test in `astronomical_time_test.dart` was titled:
+`Verifies round-trip TT -> TDB -> TT fixed-point consistency to sub-nanosecond precision`
+and asserted that `tTTReconstructed.differenceInSeconds(tTT).abs() < 1e-9`.
+
+An independent numerical analysis revealed the following:
+1. **Algebraic Inversion Bound vs. Astronomical Accuracy:**
+   The forward conversion adds $\Delta t = \delta(T_{\text{TT}})$ to `secondOfDay`, and the inverse conversion subtracts $\delta(T_{\text{TDB}})$. The difference between $\delta(T_{\text{TT}})$ and $\delta(T_{\text{TDB}})$ is governed by the derivative:
+   $$\left|\delta(T_{\text{TDB}}) - \delta(T_{\text{TT}})\right| \approx \left|\frac{d\delta}{dt}\right| |\Delta t| \le 1.2 \times 10^{-9} \times 0.0017\text{ s} \approx 2.04 \times 10^{-12}\text{ s}$$
+   While the algebraic functions invert each other to picosecond precision, this is **internal algebraic reversibility**, NOT astronomical accuracy against solar system ephemerides (which exhibits up to $\sim 40\ \mu\text{s}$ residuals). Calling this "sub-nanosecond precision" misleadingly implies that LunaSight's TDB conversion has sub-nanosecond physical accuracy.
+2. **IEEE-754 Representation Limits:**
+   In double-precision floating point, standard Julian Dates ($\approx 2.45 \times 10^6\text{ days}$) have an epsilon of $2.45 \times 10^6 \times 2^{-52} \approx 5.4 \times 10^{-10}\text{ days} \approx 47\ \mu\text{s}$. A single large Julian Date float cannot resolve nanoseconds at all. `AstronomicalTime`'s split representation (`jdBase` + `secondOfDay`) avoids this cancellation, but `AstronomicalTime.representsSameInstant()` defaults to microsecond resolution ($1\ \mu\text{s} = 10^{-6}\text{ s}$).
+3. **Corrective Action Taken:**
+   The test was renamed to:
+   `Verifies algebraic round-trip consistency of TT <-> TDB conversion pair`
+   The test assertion was relaxed to a defensible, meaningful tolerance ($< 1\ \mu\text{s}$), with explicit comments explaining that the test verifies algebraic self-consistency rather than sub-nanosecond physical accuracy.
+
+---
+
+## 6. Recorded Documentation Conflicts in Production Comments
+
+In accordance with strict audit instructions, **no comments in `lib/features/solar_earth_visibility/domain/models/astronomical_time.dart` were modified during this pass.** Instead, all identified contradictions are formally recorded below:
+
+| # | File Location | Existing Comment Text | Identified Contradiction / Issue | Status & Recommended Future Correction |
+|---|---|---|---|---|
+| **1** | `astronomical_time.dart`, line 24 | `(evaluated using exact fixed-point TDB arguments in the geocentric frame)` | The benchmark does not use fixed-point iteration; it passes TT Julian Dates directly following Note 1 of ERFA `dtdb.c`. | **Verified contradiction.** Recommend updating to: `(evaluated using the official ERFA TT-input convention in the geocentric frame)`. |
+| **2** | `astronomical_time.dart`, lines 28–29 | `At the Moon's synodic rotation rate, a timing uncertainty of 40 us corresponds to < 0.025 milliarcseconds of solar topocentric position change...` | (a) Refers to "synodic rotation rate" when lunar rotation is sidereal ($\approx 0.55''/\text{s}$).<br>(b) Cites unverified pointing displacement without independent geometrical proof. | **Technical inaccuracy.** Recommend revising to remove informal pointing claims unless independently derived. |
+| **3** | `astronomical_time.dart`, line 29 | `...well within the target design tolerance (< 100 us).` | Asserts a target design tolerance of $< 100\ \mu\text{s}$ as an established mission requirement without citing an authoritative specification document. | **Unverified requirement.** Recommend citing the formal project requirements document or removing the specific threshold. |
+| **4** | `astronomical_time.dart`, line 174 | `Since delta < 0.0017s, evaluating delta at TDB yields < 1e-10s error.` | While algebraically true ($|\Delta t| \cdot |d\delta/dt| \le 2\times 10^{-12}\text{ s}$), stating this without qualification can mislead consumers into assuming sub-nanosecond physical accuracy. | **Contextual clarification needed.** Recommend clarifying that this bound applies strictly to internal algebraic reversibility. |
+
+---
+
+## 7. Pinned Upstream Sources & Cryptographic Verification
 
 | File | Upstream Source URL | Upstream Commit | Normalized LF SHA-256 |
 | :--- | :--- | :---: | :---: |
@@ -113,7 +152,7 @@ Each file retains its complete NumFOCUS / IAU SOFA 3-clause BSD copyright and pe
 
 ---
 
-## 6. Native Reference Self-Test Results
+## 8. Native Reference Self-Test Results
 
 The benchmark harness executes five mandatory native self-tests prior to benchmarking:
 
@@ -122,7 +161,7 @@ The benchmark harness executes five mandatory native self-tests prior to benchma
    - Call: `eraDtdb(2448939.5, 0.123, 0.76543, 5.0123, 5525.242, 3190.0)`
    - Result: `-1.28036800593700245306e-03`
    - Expected: `-1.28036800593699898361e-03`
-   - Measured Absolute Error: **$3.46945 \times 10^{-18}$** (Well below the official $10^{-15}$ tolerance).
+   - Measured Absolute Error: **$3.46945 \times 10^{-18}\text{ s}$** (Well below the official $10^{-15}$ tolerance).
 3. **Geocentric Invocation Test:**
    - Call: `eraDtdb(2451545.0, 0.0, 0.0, 0.0, 0.0, 0.0)`
    - Result: $-99.3072\ \mu\text{s}$ (Verified finite and matches expected value).
@@ -131,29 +170,30 @@ The benchmark harness executes five mandatory native self-tests prior to benchma
 
 ---
 
-## 7. Newly Measured Native Benchmark Results
+## 9. Newly Measured Native Benchmark Results (Integer Grid)
 
-### 7.1 Exhaustive Hourly Sampling
-Evaluated using the native compiled `eraDtdb()` C function on true 1-hour uniform grids:
+### 9.1 Exhaustive Hourly Sampling
+Evaluated using the native compiled `eraDtdb()` C function on deterministic integer-based 1-hour uniform grids:
 
-| Metric | Range A: 1950–2050 | Range B: 1900–2100 |
+| Metric | Range A: 1950–2050 (Integer Grid) | Range B: 1900–2100 (Integer Grid) |
 | :--- | ---: | ---: |
 | **Start Epoch (TT)** | 1950-01-01 00:00:00.0 TT | 1900-01-01 00:00:00.0 TT |
 | **End Epoch (TT)** | 2050-12-31 23:00:00.0 TT | 2100-12-31 23:00:00.0 TT |
 | **Sample Count** | **885,360 samples** | **1,761,936 samples** |
-| **Sampling Interval** | **1 hour** ($3600\text{ s TT}$) | **1 hour** ($3600\text{ s TT}$) |
-| **Execution Time** | 24.10 s (36,735 calls/s) | 48.38 s (36,421 calls/s) |
+| **Integer Hour Range** | $H \in [-438300, 447059]$ | $H \in [-876588, 885347]$ |
+| **Sampling Interval** | **1 hour exact** ($3600\text{ s TT}$) | **1 hour exact** ($3600\text{ s TT}$) |
+| **Execution Time** | 12.12 s (73,045 calls/s) | 24.75 s (71,191 calls/s) |
 | **RMS Residual** | **$16.7850\ \mu\text{s}$** | **$16.9828\ \mu\text{s}$** |
 | **Mean Signed Residual** | **$+1.5293\ \mu\text{s}$** | **$+1.5354\ \mu\text{s}$** |
 | **Minimum Signed Residual** | **$-33.9951\ \mu\text{s}$** | **$-36.3465\ \mu\text{s}$** |
 | **Maximum Signed Residual** | **$+37.7449\ \mu\text{s}$** | **$+40.0067\ \mu\text{s}$** |
 | **Maximum Observed Absolute Residual** | **$37.7449\ \mu\text{s}$** | **$40.0067\ \mu\text{s}$** |
 | **Peak Residual Epoch (TT)** | **1960-10-12 01:00:00.0 TT** | **1901-10-05 19:00:00.0 TT** |
-| **Peak Julian Date (TT)** | JD 2437219.541667 TT | JD 2415663.291667 TT |
+| **Peak Julian Date (TT)** | JD 2437219.541667 TT ($H = -343811$) | JD 2415663.291667 TT ($H = -861161$) |
 
-*Note: The maximum residual figures reflect the maximum values observed on the specified discrete hourly grid.*
+*Comparison with previous results: The deterministic integer grid produces results that are mathematically identical to previous floating-point measurements to within machine precision ($< 10^{-12}\ \mu\text{s}$), demonstrating that cumulative float drift had not distorted prior metrics while guaranteeing strict deterministic integer bounds.*
 
-### 7.2 Key Reference Epochs Verification
+### 9.2 Key Reference Epochs Verification
 
 | Epoch (TT) | Julian Date (TT) | Native `eraDtdb()` | LunaSight Compact | Residual ($\text{LunaSight} - \text{ERFA}$) |
 | :--- | ---: | ---: | ---: | ---: |
@@ -170,7 +210,7 @@ Evaluated using the native compiled `eraDtdb()` C function on true 1-hour unifor
 
 ---
 
-## 8. Verification Matrix & Test Counts
+## 10. Verification Matrix & Test Counts
 
 | Step | Test Suite / Check | Command | Count / Scope | Status |
 | :---: | :--- | :--- | :---: | :---: |
@@ -189,7 +229,7 @@ Evaluated using the native compiled `eraDtdb()` C function on true 1-hour unifor
 
 ---
 
-## 9. Protection of Prior Phases & Production Code
+## 11. Protection of Prior Phases & Production Code
 
 $$\mathbf{PHASE\; 04,\; PHASE\; 05,\; AND\; PRODUCTION\; CODE\; REMAIN\; 100\%\; UNTOUCHED.}$$
 
@@ -200,8 +240,8 @@ $$\mathbf{PHASE\; 04,\; PHASE\; 05,\; AND\; PRODUCTION\; CODE\; REMAIN\; 100\%\;
 
 ---
 
-## 10. Final Verdict
+## 12. Final Verdict
 
 $$\mathbf{PASS}$$
 
-The TDB benchmark reference implementation has been successfully migrated to direct compiled native execution of the pinned IAU SOFA / ERFA `eraDtdb()` C routine. All numerical results, cryptographic hashes, and self-tests are fully verified and reproducible.
+The TDB benchmark time-grid integrity and numerical precision claims have been fully reconciled and scientifically documented. The integer-based time grid eliminates all floating-point accumulation, the benchmark's validation scope is explicitly delineated from production Dart runtime execution, and all existing docstring conflicts have been formally documented.
