@@ -113,6 +113,67 @@ void main() {
         ),
       );
     });
+
+    test(
+      'Strict exclusive upper boundary behavior for [1972-01-01, 2027-01-01)',
+      () {
+        // 1. 2026-12-31T23:59:59.999999Z -> Confirmed, returns 37s
+        final lastInstant = DateTime.utc(2026, 12, 31, 23, 59, 59, 999, 999);
+        expect(provider.isConfirmed(lastInstant), isTrue);
+        expect(provider.getTaiMinusUtcSeconds(lastInstant), 37);
+
+        // 2. 2027-01-01T00:00:00Z (Exact boundary) -> Unconfirmed!
+        final exactBoundary = DateTime.utc(2027, 1, 1, 0, 0, 0);
+        expect(provider.isConfirmed(exactBoundary), isFalse);
+        expect(
+          () => provider.getTaiMinusUtcSeconds(exactBoundary),
+          throwsA(
+            isA<ScientificComputationException>().having(
+              (e) => e.code,
+              'code',
+              'TIME_SCALE_UNCONFIRMED_FUTURE',
+            ),
+          ),
+        );
+
+        // 3. 2027-01-01T00:00:00.000001Z -> Unconfirmed!
+        final justAfterBoundary = DateTime.utc(2027, 1, 1, 0, 0, 0, 0, 1);
+        expect(provider.isConfirmed(justAfterBoundary), isFalse);
+        expect(
+          () => provider.getTaiMinusUtcSeconds(justAfterBoundary),
+          throwsA(
+            isA<ScientificComputationException>().having(
+              (e) => e.code,
+              'code',
+              'TIME_SCALE_UNCONFIRMED_FUTURE',
+            ),
+          ),
+        );
+
+        // 4. A clearly future date with explicit extrapolation enabled -> returns 37s
+        final distantFuture = DateTime.utc(2030, 6, 1, 12, 0, 0);
+        expect(provider.isConfirmed(distantFuture), isFalse);
+        expect(
+          provider.getTaiMinusUtcSeconds(
+            distantFuture,
+            allowExtrapolation: true,
+          ),
+          37,
+        );
+
+        // 5. Same future date with strict default behavior -> throws TIME_SCALE_UNCONFIRMED_FUTURE
+        expect(
+          () => provider.getTaiMinusUtcSeconds(distantFuture),
+          throwsA(
+            isA<ScientificComputationException>().having(
+              (e) => e.code,
+              'code',
+              'TIME_SCALE_UNCONFIRMED_FUTURE',
+            ),
+          ),
+        );
+      },
+    );
   });
 
   group('AstronomicalTime Core Model & Conversion Tests', () {
@@ -351,5 +412,75 @@ void main() {
         );
       },
     );
+
+    test('Enforces epoch compatibility in relativePositionFrom()', () {
+      final epoch1 = AstronomicalTime.fromJulianDate(
+        2451545.0,
+        scale: TimeScale.tdb,
+      );
+      final epoch2 = AstronomicalTime.fromJulianDate(
+        2451545.5,
+        scale: TimeScale.tdb,
+      );
+
+      final target = CelestialVector(
+        position: FramedVector3(
+          vector: Vector3(100.0, 0.0, 0.0),
+          frame: ReferenceFrameId.moonMeDe421,
+          origin: CoordinateOriginId.moonCenterOfMass,
+          unit: VectorUnit.meters,
+        ),
+        epoch: epoch1,
+      );
+
+      final observerDifferentEpoch = CelestialVector(
+        position: FramedVector3(
+          vector: Vector3(10.0, 0.0, 0.0),
+          frame: ReferenceFrameId.moonMeDe421,
+          origin: CoordinateOriginId.moonCenterOfMass,
+          unit: VectorUnit.meters,
+        ),
+        epoch: epoch2,
+      );
+
+      expect(
+        () => target.relativePositionFrom(observerDifferentEpoch),
+        throwsA(
+          isA<ScientificComputationException>().having(
+            (e) => e.code,
+            'code',
+            'INCOMPATIBLE_EPOCHS',
+          ),
+        ),
+      );
+
+      // Equivalent epochs across time scales (UTC vs TT)
+      final dtUtc = DateTime.utc(2024, 1, 1, 12, 0, 0);
+      final tUtc = AstronomicalTime.fromUtcDateTime(dtUtc);
+      final tTT = tUtc.toTerrestrialTime();
+
+      final targetUtc = CelestialVector(
+        position: FramedVector3(
+          vector: Vector3(1000.0, 0.0, 0.0),
+          frame: ReferenceFrameId.moonMeDe421,
+          origin: CoordinateOriginId.moonCenterOfMass,
+          unit: VectorUnit.meters,
+        ),
+        epoch: tUtc,
+      );
+
+      final observerTT = CelestialVector(
+        position: FramedVector3(
+          vector: Vector3(200.0, 0.0, 0.0),
+          frame: ReferenceFrameId.moonMeDe421,
+          origin: CoordinateOriginId.moonCenterOfMass,
+          unit: VectorUnit.meters,
+        ),
+        epoch: tTT,
+      );
+
+      final rel = targetUtc.relativePositionFrom(observerTT);
+      expect(rel.vector.x, closeTo(800.0, 1e-6));
+    });
   });
 }

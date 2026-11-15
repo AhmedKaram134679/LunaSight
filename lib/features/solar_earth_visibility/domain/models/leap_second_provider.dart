@@ -31,36 +31,37 @@ class LeapSecondProvider {
 
   /// Table of UTC transition epochs and resulting cumulative (TAI - UTC) offset in seconds.
   /// Sourced from IERS Bulletins and USNO `tai-utc.dat`.
-  static const List<(int year, int month, int day, int offsetSeconds)> _table = [
-    (1972, 1, 1, 10),
-    (1972, 7, 1, 11),
-    (1973, 1, 1, 12),
-    (1974, 1, 1, 13),
-    (1975, 1, 1, 14),
-    (1976, 1, 1, 15),
-    (1977, 1, 1, 16),
-    (1978, 1, 1, 17),
-    (1979, 1, 1, 18),
-    (1980, 1, 1, 19),
-    (1981, 7, 1, 20),
-    (1982, 7, 1, 21),
-    (1983, 7, 1, 22),
-    (1985, 7, 1, 23),
-    (1988, 1, 1, 24),
-    (1990, 1, 1, 25),
-    (1991, 1, 1, 26),
-    (1992, 7, 1, 27),
-    (1993, 7, 1, 28),
-    (1994, 7, 1, 29),
-    (1996, 1, 1, 30),
-    (1997, 7, 1, 31),
-    (1999, 1, 1, 32),
-    (2006, 1, 1, 33),
-    (2009, 1, 1, 34),
-    (2012, 7, 1, 35),
-    (2015, 7, 1, 36),
-    (2017, 1, 1, 37),
-  ];
+  static const List<(int year, int month, int day, int offsetSeconds)> _table =
+      [
+        (1972, 1, 1, 10),
+        (1972, 7, 1, 11),
+        (1973, 1, 1, 12),
+        (1974, 1, 1, 13),
+        (1975, 1, 1, 14),
+        (1976, 1, 1, 15),
+        (1977, 1, 1, 16),
+        (1978, 1, 1, 17),
+        (1979, 1, 1, 18),
+        (1980, 1, 1, 19),
+        (1981, 7, 1, 20),
+        (1982, 7, 1, 21),
+        (1983, 7, 1, 22),
+        (1985, 7, 1, 23),
+        (1988, 1, 1, 24),
+        (1990, 1, 1, 25),
+        (1991, 1, 1, 26),
+        (1992, 7, 1, 27),
+        (1993, 7, 1, 28),
+        (1994, 7, 1, 29),
+        (1996, 1, 1, 30),
+        (1997, 7, 1, 31),
+        (1999, 1, 1, 32),
+        (2006, 1, 1, 33),
+        (2009, 1, 1, 34),
+        (2012, 7, 1, 35),
+        (2015, 7, 1, 36),
+        (2017, 1, 1, 37),
+      ];
 
   /// Total number of leap-second increment steps implemented since 1972-01-01.
   /// Note: The initial 10s value is an epoch baseline; the subsequent 27 entries represent
@@ -68,10 +69,12 @@ class LeapSecondProvider {
   static int get leapSecondIncrementCount => _table.length - 1;
 
   /// Returns whether [utcDateTime] falls within the confirmed IERS horizon ($[1972-01-01, 2027-01-01)$).
+  ///
+  /// The upper boundary is exclusive: 2027-01-01T00:00:00Z is not confirmed and returns false.
   bool isConfirmed(DateTime utcDateTime) {
     if (!utcDateTime.isUtc) return false;
     return !utcDateTime.isBefore(minSupportedUtc) &&
-        !utcDateTime.isAfter(guaranteedUntilUtc);
+        utcDateTime.isBefore(guaranteedUntilUtc);
   }
 
   /// Returns the offset $\Delta\text{AT} = \text{TAI} - \text{UTC}$ in seconds for a given [utcDateTime].
@@ -80,8 +83,9 @@ class LeapSecondProvider {
   /// Throws [ScientificComputationException] with code `TIME_SCALE_OUT_OF_RANGE` if [utcDateTime]
   /// is before [minSupportedUtc].
   ///
-  /// If [utcDateTime] is after [guaranteedUntilUtc] and [allowExtrapolation] is false,
-  /// throws [ScientificComputationException] with code `TIME_SCALE_UNCONFIRMED_FUTURE`.
+  /// The guaranteed horizon $[1972-01-01, 2027-01-01)$ is upper-boundary exclusive.
+  /// If [utcDateTime] is on or after [guaranteedUntilUtc] (!utcDateTime.isBefore(guaranteedUntilUtc))
+  /// and [allowExtrapolation] is false, throws [ScientificComputationException] with code `TIME_SCALE_UNCONFIRMED_FUTURE`.
   int getTaiMinusUtcSeconds(
     DateTime utcDateTime, {
     bool allowExtrapolation = false,
@@ -105,9 +109,9 @@ class LeapSecondProvider {
       );
     }
 
-    if (utcDateTime.isAfter(guaranteedUntilUtc) && !allowExtrapolation) {
+    if (!utcDateTime.isBefore(guaranteedUntilUtc) && !allowExtrapolation) {
       throw ScientificComputationException(
-        message: 'UTC date is beyond the guaranteed IERS leap-second horizon (2027-01-01).',
+        message: 'UTC date is on or beyond the guaranteed IERS leap-second horizon (2027-01-01 exclusive).',
         code: 'TIME_SCALE_UNCONFIRMED_FUTURE',
         context: {
           'input_utc': utcDateTime.toIso8601String(),

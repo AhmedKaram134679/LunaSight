@@ -372,7 +372,7 @@ void main() {
         ),
       );
 
-      // 2. Incompatible frame
+      // 2. Incompatible frame: Target uses ICRF, Observer uses MOON_ME_DE421
       final icrfTarget = CelestialVector(
         position: FramedVector3(
           vector: Vector3(rMoon + 100.0, 0.0, 0.0),
@@ -397,6 +397,167 @@ void main() {
           ),
         ),
       );
+
+      // 3. Both vectors use ICRF (identical unsupported frame) -> rejected
+      final icrfObserver = CelestialVector(
+        position: FramedVector3(
+          vector: Vector3(rMoon, 0.0, 0.0),
+          frame: ReferenceFrameId.icrf,
+          origin: CoordinateOriginId.moonCenterOfMass,
+          unit: VectorUnit.meters,
+        ),
+        epoch: epoch,
+      );
+
+      expect(
+        () => converter.toTopocentric(
+          targetVector: icrfTarget,
+          observerVector: icrfObserver,
+          observerCoordinates: obsCoords,
+        ),
+        throwsA(
+          isA<ScientificComputationException>().having(
+            (e) => e.code,
+            'code',
+            'UNSUPPORTED_REFERENCE_FRAME',
+          ),
+        ),
+      );
+
+      // 4. Both vectors use J2000 (another identical unsupported frame) -> rejected
+      final j2000Target = CelestialVector(
+        position: FramedVector3(
+          vector: Vector3(rMoon + 100.0, 0.0, 0.0),
+          frame: ReferenceFrameId.j2000,
+          origin: CoordinateOriginId.moonCenterOfMass,
+          unit: VectorUnit.meters,
+        ),
+        epoch: epoch,
+      );
+      final j2000Observer = CelestialVector(
+        position: FramedVector3(
+          vector: Vector3(rMoon, 0.0, 0.0),
+          frame: ReferenceFrameId.j2000,
+          origin: CoordinateOriginId.moonCenterOfMass,
+          unit: VectorUnit.meters,
+        ),
+        epoch: epoch,
+      );
+
+      expect(
+        () => converter.toTopocentric(
+          targetVector: j2000Target,
+          observerVector: j2000Observer,
+          observerCoordinates: obsCoords,
+        ),
+        throwsA(
+          isA<ScientificComputationException>().having(
+            (e) => e.code,
+            'code',
+            'UNSUPPORTED_REFERENCE_FRAME',
+          ),
+        ),
+      );
+
+      // 5. Origin mismatch -> rejected
+      final earthOriginTarget = CelestialVector(
+        position: FramedVector3(
+          vector: Vector3(rMoon + 100.0, 0.0, 0.0),
+          frame: ReferenceFrameId.moonMeDe421,
+          origin: CoordinateOriginId.earthCenterOfMass,
+          unit: VectorUnit.meters,
+        ),
+        epoch: epoch,
+      );
+
+      expect(
+        () => converter.toTopocentric(
+          targetVector: earthOriginTarget,
+          observerVector: obsVector,
+          observerCoordinates: obsCoords,
+        ),
+        throwsA(
+          isA<ScientificComputationException>().having(
+            (e) => e.code,
+            'code',
+            'INCOMPATIBLE_COORDINATE_ORIGIN',
+          ),
+        ),
+      );
     });
+
+    test(
+      'Enforces epoch compatibility and scale conversion in toTopocentric()',
+      () {
+        final obsCoords = makeCoords(-90.0, 0.0);
+
+        final dtUtc = DateTime.utc(2024, 7, 1, 12, 0, 0);
+        final tUtc = AstronomicalTime.fromUtcDateTime(dtUtc);
+        final tTT = tUtc.toTerrestrialTime();
+        final tDifferent = AstronomicalTime.fromUtcDateTime(
+          DateTime.utc(2024, 7, 1, 12, 1, 0),
+        );
+
+        final obsVectorUtc = CelestialVector(
+          position: FramedVector3(
+            vector: Vector3(0.0, 0.0, -rMoon),
+            frame: ReferenceFrameId.moonMeDe421,
+            origin: CoordinateOriginId.moonCenterOfMass,
+            unit: VectorUnit.meters,
+          ),
+          epoch: tUtc,
+        );
+
+        // 1. Target with different physical epoch -> rejected
+        final targetDifferentEpoch = CelestialVector(
+          position: FramedVector3(
+            vector: Vector3(10000.0, 0.0, -rMoon),
+            frame: ReferenceFrameId.moonMeDe421,
+            origin: CoordinateOriginId.moonCenterOfMass,
+            unit: VectorUnit.meters,
+          ),
+          epoch: tDifferent,
+        );
+
+        expect(
+          () => converter.toTopocentric(
+            targetVector: targetDifferentEpoch,
+            observerVector: obsVectorUtc,
+            observerCoordinates: obsCoords,
+          ),
+          throwsA(
+            isA<ScientificComputationException>().having(
+              (e) => e.code,
+              'code',
+              'INCOMPATIBLE_EPOCHS',
+            ),
+          ),
+        );
+
+        // 2. Target with physically equivalent instant in different time scale (TT vs UTC) -> accepted
+        final targetTT = CelestialVector(
+          position: FramedVector3(
+            vector: Vector3(10000.0, 0.0, -rMoon),
+            frame: ReferenceFrameId.moonMeDe421,
+            origin: CoordinateOriginId.moonCenterOfMass,
+            unit: VectorUnit.meters,
+          ),
+          epoch: tTT,
+        );
+
+        final topo = converter.toTopocentric(
+          targetVector: targetTT,
+          observerVector: obsVectorUtc,
+          observerCoordinates: obsCoords,
+        );
+
+        // Preserves original target epoch metadata
+        expect(topo.epoch, tTT);
+        expect(topo.epoch.scale, TimeScale.tt);
+        expect(topo.slantRange.inMeters, closeTo(10000.0, 1e-6));
+        expect(topo.horizontalRange.inMeters, closeTo(10000.0, 1e-6));
+        expect(topo.azimuth!.inDegrees, closeTo(0.0, 1e-6));
+      },
+    );
   });
 }

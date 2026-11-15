@@ -16,10 +16,14 @@ import 'package:luna_sight/features/solar_earth_visibility/domain/models/time_sc
 ///   where $\text{jdBase}$ is the Julian Date at 00:00:00 UTC (e.g. integer $\text{JDN} - 0.5$)
 ///   and $\text{secondOfDay}$ maintains exact sub-microsecond precision without IEEE-754 mantissa exhaustion.
 /// - Implements the standard relationship: $\text{TT} = \text{TAI} + 32.184\text{ s}$.
-/// - Implements the Fairhead & Bretagnon / USNO circular approximation for $\text{TDB} - \text{TT}$:
+/// - Implements the classical compact Keplerian analytical approximation (USNO Circular No. 179 /
+///   Moyer 1981 / Fairhead & Bretagnon 1990 leading-term formulation) for $\text{TDB} - \text{TT}$:
 ///   $$\text{TDB} - \text{TT} = 0.001657\sin(g + 0.0167\sin g)\text{ seconds}$$
-///   where $g = 357.53^\circ + 35999.05^\circ T_{\text{TT}}$. This model is accurate to $< 10\text{ microseconds}$,
-///   well beyond the $100\text{ microsecond}$ requirement for planetary and lunar surface visibility.
+///   where $g = 357.53^\circ + 35999.05^\circ T_{\text{TT}}$ (with $T_{\text{TT}}$ in Julian centuries since J2000.0).
+///   This compact model yields an RMS accuracy of $\approx 20\ \mu\text{s}$ and a maximum residual
+///   of $\approx 31\ \mu\text{s}$ over 1950–2050 (and $\le 54\ \mu\text{s}$ over 1900–2100) compared to full
+///   multi-harmonic planetary series (e.g. IAU SOFA / Fairhead & Bretagnon 1990 / USNO Circular 179 Eq. 2.6).
+///   This satisfies the project's $100\ \mu\text{s}$ surface solar/lunar visibility timing requirement.
 class AstronomicalTime {
   /// Base Julian Date at 00:00:00 of the civil day ($\text{JDN} - 0.5$).
   final double jdBase;
@@ -318,6 +322,37 @@ class AstronomicalTime {
       micros ~/ 1000,
       micros % 1000,
     );
+  }
+
+  /// Evaluates whether this instant represents the same physical instant as [other]
+  /// within an explicit numerical tolerance [toleranceSeconds] (defaulting to 1 microsecond, $10^{-6}\text{ s}$).
+  ///
+  /// Physical Equivalence Contract:
+  /// - If both instances share the same [scale], evaluates difference directly via [differenceInSeconds].
+  /// - If scales differ, converts both to [TimeScale.tt] via [toTerrestrialTime] using [leapSecondProvider]
+  ///   and [allowExtrapolation], and evaluates the difference in the unified Terrestrial Time scale.
+  /// - Prevents false negatives from representation differences across civil and dynamical time scales
+  ///   without silently reinterpreting or mutating their explicit scales.
+  bool representsSameInstant(
+    AstronomicalTime other, {
+    double toleranceSeconds = 1e-6,
+    LeapSecondProvider leapSecondProvider = const LeapSecondProvider(),
+    bool allowExtrapolation = false,
+  }) {
+    if (scale == other.scale) {
+      return differenceInSeconds(other).abs() <= toleranceSeconds;
+    }
+
+    final thisTt = toTerrestrialTime(
+      leapSecondProvider: leapSecondProvider,
+      allowExtrapolation: allowExtrapolation,
+    );
+    final otherTt = other.toTerrestrialTime(
+      leapSecondProvider: leapSecondProvider,
+      allowExtrapolation: allowExtrapolation,
+    );
+
+    return thisTt.differenceInSeconds(otherTt).abs() <= toleranceSeconds;
   }
 
   @override

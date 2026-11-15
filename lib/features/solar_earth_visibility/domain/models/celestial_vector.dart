@@ -5,6 +5,7 @@ import 'package:luna_sight/features/scientific_geometry/domain/value_objects/ref
 import 'package:luna_sight/features/scientific_geometry/domain/value_objects/vector3.dart';
 import 'package:luna_sight/features/scientific_geometry/domain/value_objects/vector_unit.dart';
 import 'package:luna_sight/features/solar_earth_visibility/domain/models/astronomical_time.dart';
+import 'package:luna_sight/features/solar_earth_visibility/domain/models/leap_second_provider.dart';
 
 /// Strongly typed celestial state vector representing 3D position (and optional velocity)
 /// of a target celestial body (Sun, Earth, Moon) bound to its exact epoch, reference frame,
@@ -14,7 +15,7 @@ import 'package:luna_sight/features/solar_earth_visibility/domain/models/astrono
 /// - Explicit [AstronomicalTime] epoch tagging.
 /// - Encapsulates underlying spatial [FramedVector3].
 /// - Enforces coordinate frame consistency (e.g. `MOON_ME_DE421`, `ICRF`, `J2000`).
-/// - Rejects arithmetic operations across differing reference frames or epochs.
+/// - Rejects arithmetic operations across differing reference frames, origins, or epochs.
 class CelestialVector {
   /// The spatial position vector bound to its reference frame, origin, and unit.
   final FramedVector3 position;
@@ -64,10 +65,18 @@ class CelestialVector {
   /// Invariants:
   /// - Both vectors must share the identical [ReferenceFrameId].
   /// - Both vectors must share the identical [CoordinateOriginId].
+  /// - Both vectors must represent the same physical instant within [epochToleranceSeconds] (default $10^{-6}\text{ s}$).
   ///
-  /// Throws [ScientificComputationException] with code `INCOMPATIBLE_REFERENCE_FRAME` if frames differ,
-  /// or `INCOMPATIBLE_COORDINATE_ORIGIN` if origins differ.
-  FramedVector3 relativePositionFrom(CelestialVector observer) {
+  /// Throws [ScientificComputationException] with code:
+  /// - `INCOMPATIBLE_REFERENCE_FRAME` if frames differ.
+  /// - `INCOMPATIBLE_COORDINATE_ORIGIN` if origins differ.
+  /// - `INCOMPATIBLE_EPOCHS` if epochs represent different physical instants.
+  FramedVector3 relativePositionFrom(
+    CelestialVector observer, {
+    double epochToleranceSeconds = 1e-6,
+    LeapSecondProvider leapSecondProvider = const LeapSecondProvider(),
+    bool allowExtrapolation = false,
+  }) {
     if (frame != observer.frame) {
       throw ScientificComputationException(
         message: 'Cannot compute relative celestial vector across differing reference frames.',
@@ -86,6 +95,26 @@ class CelestialVector {
         context: {
           'target_origin': origin.name,
           'observer_origin': observer.origin.name,
+        },
+      );
+    }
+
+    final sameInstant = epoch.representsSameInstant(
+      observer.epoch,
+      toleranceSeconds: epochToleranceSeconds,
+      leapSecondProvider: leapSecondProvider,
+      allowExtrapolation: allowExtrapolation,
+    );
+    if (!sameInstant) {
+      throw ScientificComputationException(
+        message:
+            'Cannot compute relative celestial vector across differing epochs: '
+            '$epoch vs ${observer.epoch}.',
+        code: 'INCOMPATIBLE_EPOCHS',
+        context: {
+          'target_epoch': epoch.toString(),
+          'observer_epoch': observer.epoch.toString(),
+          'tolerance_seconds': epochToleranceSeconds,
         },
       );
     }
